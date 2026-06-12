@@ -64,7 +64,7 @@ fn list_(p: &mut Parser<'_>, flavor: Flavor) {
             }
         };
 
-        if !p.at_ts(PARAM_FIRST.union(ATTRIBUTE_FIRST)) {
+        if !p.at_ts(PARAM_FIRST.union(ATTRIBUTE_FIRST)) && !p.at_contextual_kw(T![tracked]) {
             p.error("expected value parameter");
             m.abandon(p);
             if p.eat(T![,]) {
@@ -74,7 +74,7 @@ fn list_(p: &mut Parser<'_>, flavor: Flavor) {
         }
         param(p, m, flavor);
         if !p.eat(T![,]) {
-            if p.at_ts(PARAM_FIRST.union(ATTRIBUTE_FIRST)) {
+            if p.at_ts(PARAM_FIRST.union(ATTRIBUTE_FIRST)) || p.at_contextual_kw(T![tracked]) {
                 p.error("expected `,`");
             } else {
                 break;
@@ -100,7 +100,12 @@ fn param(p: &mut Parser<'_>, m: Marker, flavor: Flavor) {
 
         // test fn_def_param
         // fn foo(..., (x, y): (i32, i32)) {}
+
+        // test tracked_fn_def_param
+        // fn foo(tracked x: i32) {}
         Flavor::FnDef => {
+            p.eat_contextual_kw(T![tracked]);
+
             patterns::pattern(p);
             if !variadic_param(p) {
                 if p.at(T![:]) {
@@ -164,7 +169,16 @@ fn variadic_param(p: &mut Parser<'_>) -> bool {
 //     fn d(&'a mut self, x: i32) {}
 //     fn e(mut self) {}
 // }
+
+// test tracked_self_param
+// impl S {
+//     fn f(tracked self) {}
+// }
 fn opt_self_param(p: &mut Parser<'_>, m: Marker) -> Result<(), Marker> {
+    if p.at_contextual_kw(T![tracked]) {
+        p.expect_contextual_kw(T![tracked]);
+    }
+
     if p.at(T![self]) || p.at(T![mut]) && p.nth(1) == T![self] {
         p.eat(T![mut]);
         self_as_name(p);

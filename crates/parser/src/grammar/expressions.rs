@@ -12,7 +12,7 @@ pub(super) enum Semicolon {
     Forbidden,
 }
 
-const EXPR_FIRST: TokenSet = LHS_FIRST;
+pub(crate) const EXPR_FIRST: TokenSet = LHS_FIRST;
 
 pub(super) fn expr(p: &mut Parser<'_>) -> Option<CompletedMarker> {
     let r = Restrictions { forbid_structs: false, prefer_stmt: false };
@@ -23,11 +23,35 @@ pub(super) fn expr_stmt(
     p: &mut Parser<'_>,
     m: Option<Marker>,
 ) -> Option<(CompletedMarker, BlockLike)> {
+    // verus: entry(1/2) for assert/assume
+    let la = p.nth(1);
+    let verus_assert_like = (p.at_contextual_kw(T![assert]) || p.at_contextual_kw(T![assume]))
+        && (la == T!['('] || p.nth_at_contextual_kw(1, T![forall]));
+    if verus_assert_like {
+        let m = m.unwrap_or_else(|| {
+            let m = p.start();
+            attributes::outer_attrs(p);
+            m
+        });
+        let pred_expr =
+            if p.at_contextual_kw(T![assert]) { verus::assert(p, m) } else { verus::assume(p, m) };
+        return Some((pred_expr, BlockLike::NotBlock));
+    }
+    if p.at_contextual_kw(T![choose]) {
+        let m = m.unwrap_or_else(|| {
+            let m = p.start();
+            attributes::outer_attrs(p);
+            m
+        });
+        let pred_expr = verus::verus_closure_expr(p, Some(m), false);
+        return Some((pred_expr, BlockLike::NotBlock));
+    }
+
     let r = Restrictions { forbid_structs: false, prefer_stmt: true };
     expr_bp(p, m, r, 1)
 }
 
-fn expr_no_struct(p: &mut Parser<'_>) {
+pub(crate) fn expr_no_struct(p: &mut Parser<'_>) {
     let r = Restrictions { forbid_structs: true, prefer_stmt: false };
     expr_bp(p, None, r, 1);
 }
@@ -68,6 +92,24 @@ pub(super) fn stmt(p: &mut Parser<'_>, semicolon: Semicolon) {
         Ok(()) => return,
         Err(m) => m,
     };
+
+    // verus: entry(2/2) for assert/assume
+    let la = p.nth(1);
+    let verus_assert_like = (p.at_contextual_kw(T![assert]) || p.at_contextual_kw(T![assume]))
+        && (la == T!['('] || p.nth_at_contextual_kw(1, T![forall]));
+    if verus_assert_like {
+        let m1 = p.start();
+        if p.at_contextual_kw(T![assert]) {
+            verus::assert(p, m1);
+        } else {
+            verus::assume(p, m1);
+        }
+        if p.at(T![;]) {
+            p.expect(T![;]);
+        }
+        m.complete(p, EXPR_STMT);
+        return;
+    }
 
     if !p.at_ts(EXPR_FIRST) {
         p.err_and_bump("expected expression, item or let statement");
@@ -115,6 +157,9 @@ pub(super) fn stmt(p: &mut Parser<'_>, semicolon: Semicolon) {
 pub(super) fn let_stmt(p: &mut Parser<'_>, with_semi: Semicolon) {
     p.eat(T![super]);
     p.bump(T![let]);
+    // verus
+    p.eat_contextual_kw(T![ghost]);
+    p.eat_contextual_kw(T![tracked]);
     patterns::pattern(p);
     if p.at(T![:]) {
         // test let_stmt_ascription
@@ -159,6 +204,23 @@ pub(super) fn let_stmt(p: &mut Parser<'_>, with_semi: Semicolon) {
 }
 
 pub(super) fn expr_block_contents(p: &mut Parser<'_>) {
+    // verus
+    if p.at(T![&&&]) || p.at(T![|||]) {
+        let mm = p.start();
+        if p.at(T![&&&]) {
+            p.expect(T![&&&]);
+        }
+        if p.at(T![|||]) {
+            p.expect(T![|||]);
+        }
+        attributes::inner_attrs(p);
+        // With Verus's triple-operators, we know the next item should be an expression,
+        // whereas Rust expects a block to contain statements.
+        expr(p);
+        mm.abandon(p);
+        return;
+    }
+
     attributes::inner_attrs(p);
 
     while !p.at(EOF) && !p.at(T!['}']) {
@@ -202,6 +264,7 @@ fn current_op(p: &Parser<'_>) -> (u8, SyntaxKind, Associativity) {
     use Associativity::*;
     const NOT_AN_OP: (u8, SyntaxKind, Associativity) = (0, T![@], Left);
     match p.current() {
+        T![|] if p.at(T![|||]) => (1, T![|||], Left), // verus
         T![|] if p.at(T![||])  => (3,  T![||],  Left),
         T![|] if p.at(T![|=])  => (1,  T![|=],  Right),
         T![|]                  => (6,  T![|],   Left),
@@ -209,8 +272,14 @@ fn current_op(p: &Parser<'_>) -> (u8, SyntaxKind, Associativity) {
         T![>] if p.at(T![>>])  => (9,  T![>>],  Left),
         T![>] if p.at(T![>=])  => (5,  T![>=],  Left),
         T![>]                  => (5,  T![>],   Left),
+        T![=] if p.at(T![=~~=]) => (5, T![=~~=], Left), // verus
+        T![=] if p.at(T![=~=]) => (5, T![=~=], Left),   // verus
+        T![=] if p.at(T![==>]) => (2, T![==>], Left),   // verus
+        T![=] if p.at(T![===]) => (5, T![===], Left),   // verus
         T![=] if p.at(T![==])  => (5,  T![==],  Left),
         T![=] if !p.at(T![=>]) => (1,  T![=],   Right),
+        T![<] if p.at(T![<==>]) => (2, T![<==>], Left), // verus
+        T![<] if p.at(T![<==]) => (2, T![<==], Left),   // verus
         T![<] if p.at(T![<=])  => (5,  T![<=],  Left),
         T![<] if p.at(T![<<=]) => (1,  T![<<=], Right),
         T![<] if p.at(T![<<])  => (9,  T![<<],  Left),
@@ -222,6 +291,7 @@ fn current_op(p: &Parser<'_>) -> (u8, SyntaxKind, Associativity) {
         T![%] if p.at(T![%=])  => (1,  T![%=],  Right),
         T![%]                  => (11, T![%],   Left),
         T![&] if p.at(T![&=])  => (1,  T![&=],  Right),
+        T![&] if p.at(T![&&&]) => (1, T![&&&], Left), // verus
         // If you update this, remember to update `expr_let()` too.
         T![&] if p.at(T![&&])  => (4,  T![&&],  Left),
         T![&]                  => (8,  T![&],   Left),
@@ -231,6 +301,9 @@ fn current_op(p: &Parser<'_>) -> (u8, SyntaxKind, Associativity) {
         T![*]                  => (11, T![*],   Left),
         T![.] if p.at(T![..=]) => (2,  T![..=], Left),
         T![.] if p.at(T![..])  => (2,  T![..],  Left),
+        T![!] if p.at(T![!==]) => (5, T![!==], Left), // verus
+        T![!] if p.at(T![!~~=]) => (5, T![!~~=], Left), // verus
+        T![!] if p.at(T![!~=]) => (5, T![!~=], Left), // verus
         T![!] if p.at(T![!=])  => (5,  T![!=],  Left),
         T![-] if p.at(T![-=])  => (1,  T![-=],  Right),
         T![-]                  => (10, T![-],   Left),
@@ -253,7 +326,9 @@ fn expr_bp(
         m
     });
 
-    if !p.at_ts(EXPR_FIRST) {
+    if !p.at_ts(EXPR_FIRST)
+        && !(p.at_contextual_kw(T![proof]) && (p.nth_at(1, T!['{']) || p.nth_at(1, T![!])))
+    {
         p.err_recover("expected expression", atom::EXPR_RECOVERY_SET);
         m.abandon(p);
         return None;
@@ -326,6 +401,18 @@ const LHS_FIRST: TokenSet =
 
 fn lhs(p: &mut Parser<'_>, r: Restrictions) -> Option<(CompletedMarker, BlockLike)> {
     let m;
+    if p.at(T![|||]) || p.at(T![&&&]) {
+        let m = p.start();
+        if p.at(T![|||]) {
+            p.bump(T![|||]);
+        } else {
+            p.bump(T![&&&]);
+        }
+        expr_bp(p, None, r, 255);
+        let cm = m.complete(p, PREFIX_EXPR);
+        return Some((cm, BlockLike::NotBlock));
+    }
+
     let kind = match p.current() {
         // test ref_expr
         // fn foo() {
@@ -441,6 +528,21 @@ fn postfix_expr(
                 }
             },
             T![?] => try_expr(p, lhs),
+            // verus
+            T![@] => verus::view_expr(p, lhs),
+            IDENT if p.at_contextual_kw(T![is]) => verus::is_expr(p, lhs),
+            IDENT if p.at_contextual_kw(T![has]) => verus::has_expr(p, lhs),
+            T![!] if p.nth_at_contextual_kw(1, T![is]) => {
+                p.bump(T![!]);
+                verus::is_expr(p, lhs)
+            }
+            T![!] if p.nth_at_contextual_kw(1, T![has]) => {
+                p.bump(T![!]);
+                verus::has_expr(p, lhs)
+            }
+            T![->] => verus::arrow_expr(p, lhs),
+            IDENT if p.at_contextual_kw(T![matches]) => verus::matches_expr(p, lhs),
+            T![-] if p.nth_at(1, T![>]) => verus::arrow_expr(p, lhs),
             _ => break,
         };
         allow_calls = true;
@@ -673,7 +775,11 @@ fn path_expr(p: &mut Parser<'_>, r: Restrictions) -> (CompletedMarker, BlockLike
             record_expr_field_list(p);
             (m.complete(p, RECORD_EXPR), BlockLike::NotBlock)
         }
-        T![!] if !p.at(T![!=]) => {
+        T![!]
+            if !p.at(T![!=])
+                && !p.nth_at_contextual_kw(1, T![is])
+                && !p.nth_at_contextual_kw(1, T![has]) =>
+        {
             let block_like = items::macro_call_after_excl(p);
             (m.complete(p, MACRO_CALL).precede(p).complete(p, MACRO_EXPR), block_like)
         }

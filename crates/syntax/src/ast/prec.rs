@@ -91,6 +91,10 @@ pub fn precedence(expr: &ast::Expr) -> ExprPrecedence {
                 BinaryOp::LogicOp(logic_op) => match logic_op {
                     ast::LogicOp::And => ExprPrecedence::LAnd,
                     ast::LogicOp::Or => ExprPrecedence::LOr,
+                    // verus
+                    ast::LogicOp::Imply | ast::LogicOp::RevImply | ast::LogicOp::Iff => {
+                        ExprPrecedence::LOr
+                    }
                 },
                 BinaryOp::ArithOp(arith_op) => match arith_op {
                     ast::ArithOp::Add | ast::ArithOp::Sub => ExprPrecedence::Sum,
@@ -136,6 +140,17 @@ pub fn precedence(expr: &ast::Expr) -> ExprPrecedence {
         | Expr::UnderscoreExpr(_)
         | Expr::WhileExpr(_)
         | Expr::IncludeBytesExpr(_) => ExprPrecedence::Unambiguous,
+
+        // Verus
+        Expr::ViewExpr(_)
+        | Expr::AssertExpr(_)
+        | Expr::AssumeExpr(_)
+        | Expr::FinalExpr(_)
+        | Expr::AssertForallExpr(_)
+        | Expr::IsExpr(_)
+        | Expr::HasExpr(_)
+        | Expr::ArrowExpr(_)
+        | Expr::MatchesExpr(_) => ExprPrecedence::Unambiguous,
     }
 }
 
@@ -360,6 +375,10 @@ impl Expr {
                     LogicOp(op) => match op {
                         Or => (7, 8),
                         And => (9, 10),
+                        // verus
+                        Imply => (0, 0),
+                        RevImply => (0, 0),
+                        Iff => (0, 0),
                     },
                     CmpOp(_) => (11, 11),
                     ArithOp(op) => match op {
@@ -380,11 +399,16 @@ impl Expr {
             AwaitExpr(_) | CallExpr(_) | MethodCallExpr(_) | IndexExpr(_) | TryExpr(_)
             | MacroExpr(_) => (29, 0),
 
-            FieldExpr(_) => (31, 32),
+            FieldExpr(_) | IsExpr(_) | HasExpr(_) | ArrowExpr(_) | MatchesExpr(_) => (31, 32),
 
             ArrayExpr(_) | TupleExpr(_) | Literal(_) | PathExpr(_) | ParenExpr(_) | IfExpr(_)
             | WhileExpr(_) | ForExpr(_) | LoopExpr(_) | MatchExpr(_) | BlockExpr(_)
             | RecordExpr(_) | UnderscoreExpr(_) | IncludeBytesExpr(_) => (0, 0),
+
+            // verus: ViewExpr(@) is similar to TryExpr(?)
+            ViewExpr(_) | AssertExpr(_) | AssumeExpr(_) | FinalExpr(_) | AssertForallExpr(_) => {
+                (29, 0)
+            }
         }
     }
 
@@ -530,6 +554,13 @@ impl Expr {
                 | IfExpr(_) | WhileExpr(_) | ForExpr(_) | LoopExpr(_) | MatchExpr(_)
                 | BlockExpr(_) | RecordExpr(_) | UnderscoreExpr(_) | MacroExpr(_)
                 | IncludeBytesExpr(_) => None,
+                // verus
+                ViewExpr(e) => e.at_token(),
+                ArrowExpr(e) => e.thin_arrow_token(),
+                IsExpr(e) => e.is_token(),
+                HasExpr(e) => e.has_token(),
+                MatchesExpr(e) => e.matches_token(),
+                AssertExpr(_) | AssumeExpr(_) | FinalExpr(_) | AssertForallExpr(_) => None,
             };
 
             token.map(|t| t.text_range()).unwrap_or_else(|| this.syntax().text_range()).start()
@@ -557,6 +588,10 @@ impl Expr {
                 .unwrap_or(false),
 
             ForExpr(_) | IfExpr(_) | MatchExpr(_) | WhileExpr(_) | IncludeBytesExpr(_) => true,
+
+            // verus
+            ViewExpr(_) | IsExpr(_) | HasExpr(_) | ArrowExpr(_) | MatchesExpr(_)
+            | AssertExpr(_) | AssumeExpr(_) | FinalExpr(_) | AssertForallExpr(_) => false,
         }
     }
 

@@ -24,8 +24,8 @@ span.workspace = true
 intern.workspace = true
 
 [dev-dependencies]
-expect-test = "1.5.1"
 test-utils.workspace = true
+expect-test.workspace = true
 
 [features]
 in-rust-tree = ["parser/in-rust-tree", "tt/in-rust-tree", "syntax/in-rust-tree"]

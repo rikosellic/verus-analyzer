@@ -1,0 +1,34 @@
+SOURCE_FILE
+  IMPL
+    IMPL_KW "impl"
+    WHITESPACE " "
+    PATH_TYPE
+      PATH
+        PATH_SEGMENT
+          NAME_REF
+            IDENT "S"
+    WHITESPACE " "
+    ASSOC_ITEM_LIST
+      L_CURLY "{"
+      WHITESPACE "\n    "
+      FN
+        FN_KW "fn"
+        WHITESPACE " "
+        NAME
+          IDENT "f"
+        PARAM_LIST
+          L_PAREN "("
+          SELF_PARAM
+            TRACKED_KW "tracked"
+            WHITESPACE " "
+            NAME
+              SELF_KW "self"
+          R_PAREN ")"
+        WHITESPACE " "
+        BLOCK_EXPR
+          STMT_LIST
+            L_CURLY "{"
+            R_CURLY "}"
+      WHITESPACE "\n"
+      R_CURLY "}"
+  WHITESPACE "\n"

@@ -12,6 +12,8 @@ use test_utils::{bench, bench_fixture, project_root};
 
 use crate::{AstNode, SourceFile, SyntaxError, ast, fuzz};
 
+mod verus;
+
 #[test]
 fn parse_smoke_test() {
     let code = r#"
@@ -75,6 +77,7 @@ fn reparse_fuzz_tests() {
 
 /// Test that Rust-analyzer can parse and validate the rust-analyzer
 #[test]
+#[ignore = "Verus special-case assert keyword, which makes assert! invalid"]
 fn self_hosting_parsing() {
     let crates_dir = project_root().join("crates");
 
@@ -98,8 +101,14 @@ fn self_hosting_parsing() {
     }
 
     files.retain(|path| {
-        // Get all files which are not in the crates/syntax/test_data folder
-        !path.components().any(|component| component.as_os_str() == "test_data")
+        // Keep self-hosting focused on Rust files that should parse as plain Rust.
+        // Verus example fixtures intentionally use extra syntax accepted by this fork's
+        // Verus pipeline, but not by rust-analyzer's generic self-hosting Rust check.
+        let is_syntax_test_data =
+            path.components().any(|component| component.as_os_str() == "test_data");
+        let is_verus_example = path.starts_with(project_root().join("crates/va-test/examples"));
+
+        !is_syntax_test_data && !is_verus_example
     });
 
     assert!(

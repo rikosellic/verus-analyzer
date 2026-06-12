@@ -636,6 +636,18 @@ mod ok {
     #[test]
     fn struct_item() { run_and_expect_no_errors("test_data/parser/inline/ok/struct_item.rs"); }
     #[test]
+    fn tracked_fn_def_param() {
+        run_and_expect_no_errors("test_data/parser/inline/ok/tracked_fn_def_param.rs");
+    }
+    #[test]
+    fn tracked_self_param() {
+        run_and_expect_no_errors("test_data/parser/inline/ok/tracked_self_param.rs");
+    }
+    #[test]
+    fn tracked_tuple_ret_type() {
+        run_and_expect_no_errors("test_data/parser/inline/ok/tracked_tuple_ret_type.rs");
+    }
+    #[test]
     fn trait_alias() { run_and_expect_no_errors("test_data/parser/inline/ok/trait_alias.rs"); }
     #[test]
     fn trait_alias_where_clause() {
@@ -770,6 +782,16 @@ mod ok {
     #[test]
     fn variant_discriminant() {
         run_and_expect_no_errors("test_data/parser/inline/ok/variant_discriminant.rs");
+    }
+    #[test]
+    fn verus_enum_variant_visibility() {
+        run_and_expect_no_errors("test_data/parser/inline/ok/verus_enum_variant_visibility.rs");
+    }
+    #[test]
+    fn verus_proof_macro_without_semicolon() {
+        run_and_expect_no_errors(
+            "test_data/parser/inline/ok/verus_proof_macro_without_semicolon.rs",
+        );
     }
     #[test]
     fn where_clause() { run_and_expect_no_errors("test_data/parser/inline/ok/where_clause.rs"); }

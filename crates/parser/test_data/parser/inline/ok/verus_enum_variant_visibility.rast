@@ -1,0 +1,51 @@
+SOURCE_FILE
+  ENUM
+    VISIBILITY
+      PUB_KW "pub"
+    WHITESPACE " "
+    DATA_MODE
+      TRACKED_KW "tracked"
+    WHITESPACE " "
+    ENUM_KW "enum"
+    WHITESPACE " "
+    NAME
+      IDENT "T"
+    WHITESPACE " "
+    VARIANT_LIST
+      L_CURLY "{"
+      WHITESPACE " "
+      VARIANT
+        VISIBILITY
+          PUB_KW "pub"
+        WHITESPACE " "
+        NAME
+          IDENT "A"
+        TUPLE_FIELD_LIST
+          L_PAREN "("
+          TUPLE_FIELD
+            PATH_TYPE
+              PATH
+                PATH_SEGMENT
+                  NAME_REF
+                    IDENT "usize"
+          R_PAREN ")"
+      COMMA ","
+      WHITESPACE " "
+      VARIANT
+        VISIBILITY
+          PUB_KW "pub"
+        WHITESPACE " "
+        NAME
+          IDENT "B"
+        TUPLE_FIELD_LIST
+          L_PAREN "("
+          TUPLE_FIELD
+            PATH_TYPE
+              PATH
+                PATH_SEGMENT
+                  NAME_REF
+                    IDENT "int"
+          R_PAREN ")"
+      WHITESPACE " "
+      R_CURLY "}"
+  WHITESPACE "\n"

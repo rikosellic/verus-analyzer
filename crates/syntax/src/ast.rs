@@ -2,14 +2,15 @@
 
 pub mod edit;
 mod expr_ext;
-mod generated;
+pub mod generated;
 pub mod make;
 mod node_ext;
-mod operators;
+pub mod operators;
 pub mod prec;
 pub mod syntax_factory;
 mod token_ext;
-mod traits;
+pub(crate) mod traits;
+pub mod vst;
 
 use std::marker::PhantomData;
 

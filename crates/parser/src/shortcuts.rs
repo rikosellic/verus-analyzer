@@ -37,6 +37,7 @@ impl LexedStr<'_> {
                 let token_text = self.text(i);
                 res.push_ident(
                     SyntaxKind::from_contextual_keyword(token_text, edition)
+                        .or_else(|| (token_text == "verus_").then_some(VERUS_KW))
                         .unwrap_or(SyntaxKind::IDENT),
                     edition,
                 )

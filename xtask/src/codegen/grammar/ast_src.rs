@@ -99,6 +99,18 @@ const PUNCT: &[(&str, &str)] = &[
     (">>", "SHR"),
     ("<<=", "SHLEQ"),
     (">>=", "SHREQ"),
+    // verus
+    ("&&&", "BIGAND"),
+    ("|||", "BIGOR"),
+    ("<==>", "EQUIV"),
+    ("==>", "IMPLY"),
+    ("<==", "EXPLY"),
+    ("===", "EQEQEQ"),
+    ("!==", "NEEQ"),
+    ("=~=", "EXT_EQ"),
+    ("!~=", "EXT_NE"),
+    ("=~~=", "DEEP_EXT_EQ"),
+    ("!~~=", "DEEP_EXT_NE"),
 ];
 const TOKENS: &[&str] = &["ERROR", "WHITESPACE", "NEWLINE", "COMMENT"];
 // &["ERROR", "IDENT", "WHITESPACE", "LIFETIME_IDENT", "COMMENT", "SHEBANG"],;
@@ -124,6 +136,54 @@ const CONTEXTUAL_KEYWORDS: &[&str] = &[
     "cfg_attr",
     "cfg",
     "null",
+    // Verus contextual keywords
+    "align",
+    "any",
+    "assert",
+    "assume",
+    "assume_specification",
+    "axiom",
+    "broadcast",
+    "by",
+    "checked",
+    "choose",
+    "closed",
+    "decreases",
+    "default_ensures",
+    "ensures",
+    "exec",
+    "exists",
+    "forall",
+    "ghost",
+    "global",
+    "group",
+    "has",
+    "implies",
+    "invariant",
+    "invariant_except_break",
+    "is",
+    "layout",
+    "matches",
+    "no_unwind",
+    "none",
+    "open",
+    "opens_invariants",
+    "proof",
+    "proof_fn",
+    "prover",
+    "recommends",
+    "requires",
+    "returns",
+    "reveal_fn",
+    "size",
+    "size_of",
+    "spec",
+    "tracked",
+    "trigger",
+    "uninterp",
+    "verus",
+    "via",
+    "when",
 ];
 // keywords we use for special macro expansions
 const CONTEXTUAL_BUILTIN_KEYWORDS: &[&str] = &[
@@ -277,7 +337,7 @@ pub(crate) struct AstNodeSrc {
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum Field {
-    Token { name: Option<String>, token: String },
+    Token { name: Option<String>, token: String, cardinality: Cardinality },
     Node { name: String, ty: String, cardinality: Cardinality },
 }
 
@@ -285,6 +345,8 @@ pub(crate) enum Field {
 pub(crate) enum Cardinality {
     Optional,
     Many,
+    // verus: token/node guaranteed present in a complete tree (used by VST codegen)
+    One,
 }
 
 #[derive(Debug)]

@@ -20,12 +20,21 @@ fn attr(p: &mut Parser<'_>, inner: bool) {
     let attr = p.start();
     p.bump(T![#]);
 
+    let inner =
+        inner || p.at(T![!]) && p.nth_at(1, T!['[']) && p.nth_at_contextual_kw(2, T![trigger]);
     if inner {
         p.bump(T![!]);
     }
 
     if p.expect(T!['[']) {
-        meta(p);
+        // verus: `#[trigger ..]` and `#![trigger ..]` are special-cased to a
+        // dedicated `TRIGGER_ATTRIBUTE` syntax node so that the proof_action
+        // handlers can recognise them without re-parsing.
+        if p.at_contextual_kw(T![trigger]) {
+            super::verus::trigger_attribute(p, inner);
+        } else {
+            meta(p);
+        }
         p.expect(T![']']);
     }
 

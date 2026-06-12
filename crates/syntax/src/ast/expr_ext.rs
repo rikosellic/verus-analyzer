@@ -180,8 +180,17 @@ impl ast::BinExpr {
             let bin_op = match c.kind() {
                 T![||] => BinaryOp::LogicOp(LogicOp::Or),
                 T![&&] => BinaryOp::LogicOp(LogicOp::And),
+                // verus
+                T![|||] => BinaryOp::LogicOp(LogicOp::Or),
+                T![&&&] => BinaryOp::LogicOp(LogicOp::And),
+                T![==>] => BinaryOp::LogicOp(LogicOp::Imply),
+                T![<==>] => BinaryOp::LogicOp(LogicOp::Iff),
+                T![<==] => BinaryOp::LogicOp(LogicOp::RevImply),
 
                 T![==] => BinaryOp::CmpOp(CmpOp::Eq { negated: false }),
+                // verus: TODO: separate operator for extensional equality?
+                T![=~=] | T![=~~=] | T![===] => BinaryOp::CmpOp(CmpOp::Eq { negated: false }),
+                T![!==] | T![!~=] | T![!~~=] => BinaryOp::CmpOp(CmpOp::Eq { negated: true }),
                 T![!=] => BinaryOp::CmpOp(CmpOp::Eq { negated: true }),
                 T![<=] => BinaryOp::CmpOp(CmpOp::Ord { ordering: Ordering::Less,    strict: false }),
                 T![>=] => BinaryOp::CmpOp(CmpOp::Ord { ordering: Ordering::Greater, strict: false }),
@@ -375,6 +384,7 @@ impl ast::Literal {
 pub enum BlockModifier {
     Async(SyntaxToken),
     Unsafe(SyntaxToken),
+    Proof(SyntaxToken),
     Try {
         try_token: SyntaxToken,
         bikeshed_token: Option<SyntaxToken>,
@@ -398,6 +408,7 @@ impl ast::BlockExpr {
             })
             .or_else(|| self.async_token().map(BlockModifier::Async))
             .or_else(|| self.unsafe_token().map(BlockModifier::Unsafe))
+            .or_else(|| support::token(&self.syntax, T![proof]).map(BlockModifier::Proof))
             .or_else(|| {
                 let modifier = self.try_block_modifier()?;
                 let try_token = modifier.try_token()?;

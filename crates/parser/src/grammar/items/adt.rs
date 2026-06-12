@@ -1,10 +1,14 @@
 use crate::grammar::attributes::ATTRIBUTE_FIRST;
+use crate::grammar::verus;
 
 use super::*;
 
 // test struct_item
 // struct S {}
 pub(super) fn strukt(p: &mut Parser<'_>, m: Marker) {
+    if p.at_contextual_kw(T![ghost]) || p.at_contextual_kw(T![tracked]) {
+        verus::data_mode(p);
+    }
     p.bump(T![struct]);
     struct_or_union(p, m, true);
 }
@@ -53,6 +57,9 @@ fn struct_or_union(p: &mut Parser<'_>, m: Marker, is_struct: bool) {
 }
 
 pub(super) fn enum_(p: &mut Parser<'_>, m: Marker) {
+    if p.at_contextual_kw(T![ghost]) || p.at_contextual_kw(T![tracked]) {
+        verus::data_mode(p);
+    }
     p.bump(T![enum]);
     name_r(p, ITEM_RECOVERY_SET);
     generic_params::opt_generic_param_list(p);
@@ -85,6 +92,9 @@ pub(crate) fn variant_list(p: &mut Parser<'_>) {
     fn variant(p: &mut Parser<'_>) {
         let m = p.start();
         attributes::outer_attrs(p);
+        // test verus_enum_variant_visibility
+        // pub tracked enum T { pub A(usize), pub B(int) }
+        opt_visibility(p, false);
         if p.at(IDENT) {
             name(p);
         } else if p.at(T![_]) {
@@ -136,6 +146,10 @@ pub(crate) fn record_field_list(p: &mut Parser<'_>) {
         // struct S { #[attr] f: f32 }
         attributes::outer_attrs(p);
         opt_visibility(p, false);
+
+        if p.at_contextual_kw(T![ghost]) || p.at_contextual_kw(T![tracked]) {
+            verus::data_mode(p);
+        }
 
         if p.at(T![mut]) && p.nth(1) == T!['('] {
             // test record_mut_restrictions_before
@@ -201,6 +215,10 @@ fn tuple_field_list(p: &mut Parser<'_>) {
             // struct S (#[attr] f32);
             attributes::outer_attrs(p);
             let has_vis = opt_visibility(p, true);
+
+            if p.at_contextual_kw(T![ghost]) || p.at_contextual_kw(T![tracked]) {
+                verus::data_mode(p);
+            }
 
             if p.at(T![mut]) && p.nth(1) == T!['('] {
                 // test tuple_mut_restrictions

@@ -70,6 +70,7 @@ pub fn to_parser_input(
                                 None => {
                                     let contextual_keyword =
                                         SyntaxKind::from_contextual_keyword(text, edition)
+                                            .or_else(|| (text == "verus_").then_some(VERUS_KW))
                                             .unwrap_or(SyntaxKind::IDENT);
                                     res.push_ident(contextual_keyword, edition);
                                 }

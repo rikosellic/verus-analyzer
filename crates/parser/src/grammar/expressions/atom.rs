@@ -1,4 +1,5 @@
 use crate::grammar::types::type_;
+use crate::grammar::verus;
 
 use super::*;
 
@@ -65,6 +66,8 @@ pub(super) const ATOM_EXPR_FIRST: TokenSet =
         T![while],
         T![yield],
         LIFETIME_IDENT,
+        // verus
+        T![final],
     ]));
 
 pub(in crate::grammar) const EXPR_RECOVERY_SET: TokenSet =
@@ -79,6 +82,69 @@ pub(super) fn atom_expr(
     }
     if p.at_contextual_kw(T![builtin]) && p.nth_at(1, T![#]) {
         return Some((builtin_expr(p)?, BlockLike::NotBlock));
+    }
+    // verus: quantifier / chooser closure. Only fire when the keyword is
+    // immediately followed by `|` (the closure binder list); otherwise these
+    // contextual keywords are ordinary identifiers.
+    if (p.at_contextual_kw(T![choose])
+        || p.at_contextual_kw(T![forall])
+        || p.at_contextual_kw(T![exists]))
+        && (p.nth_at(1, T![|]) || p.nth_at(1, T![||]) || p.nth_at(1, T![|||]))
+    {
+        let pred_expr = verus::verus_closure_expr(p, None, r.forbid_structs);
+        return Some((pred_expr, BlockLike::NotBlock));
+    }
+    if p.at(T![final]) {
+        let m = p.start();
+        let pred_expr = verus::final_(p, m);
+        return Some((pred_expr, BlockLike::NotBlock));
+    }
+    if p.at_contextual_kw(T![proof_fn]) {
+        return Some((closure_expr(p), BlockLike::NotBlock));
+    }
+    if p.at_contextual_kw(T![proof]) && p.nth_at(1, T!['{']) {
+        let m = p.start();
+        p.bump_remap(T![proof]);
+        stmt_list(p);
+        return Some((m.complete(p, BLOCK_EXPR), BlockLike::Block));
+    }
+    // test verus_proof_macro_without_semicolon
+    // fn f() {
+    //     proof! {
+    //         assert(true);
+    //     }
+    //     proof! {}
+    // }
+    if p.at_contextual_kw(T![proof]) && p.nth_at(1, T![!]) {
+        let m = p.start();
+        let macro_call = p.start();
+        let path = p.start();
+        let path_segment = p.start();
+        let name_ref = p.start();
+        p.bump_remap(IDENT);
+        name_ref.complete(p, NAME_REF);
+        path_segment.complete(p, PATH_SEGMENT);
+        path.complete(p, PATH);
+        let block_like = items::macro_call_after_excl(p);
+        macro_call.complete(p, MACRO_CALL);
+        return Some((m.complete(p, MACRO_EXPR), block_like));
+    }
+    // Special-case `matches!` as a macro call. `matches` is a contextual keyword
+    // for the Verus postfix operator (`x matches Pattern`); when followed by `!`
+    // we treat it as the standard Rust macro call.
+    if p.at_contextual_kw(T![matches]) && p.nth_at(1, T![!]) {
+        let m = p.start();
+        let macro_call = p.start();
+        let path = p.start();
+        let path_segment = p.start();
+        let name_ref = p.start();
+        p.bump_remap(IDENT);
+        name_ref.complete(p, NAME_REF);
+        path_segment.complete(p, PATH_SEGMENT);
+        path.complete(p, PATH);
+        let block_like = items::macro_call_after_excl(p);
+        macro_call.complete(p, MACRO_CALL);
+        return Some((m.complete(p, MACRO_EXPR), block_like));
     }
     if paths::is_path_start(p) {
         return Some(path_expr(p, r));
@@ -187,8 +253,16 @@ pub(super) fn atom_expr(
             stmt_list(p);
             m.complete(p, BLOCK_EXPR)
         }
-
         T![const] | T![static] | T![async] | T![move] | T![|] => closure_expr(p),
+        // verus
+        IDENT
+            if (p.at_contextual_kw(T![forall])
+                || p.at_contextual_kw(T![exists])
+                || p.at_contextual_kw(T![choose]))
+                && (la == T![|] || la == T![||] || la == T![|||]) =>
+        {
+            verus::verus_closure_expr(p, None, r.forbid_structs)
+        }
         T![for] if la == T![<] => closure_expr(p),
         T![for] => for_expr(p, None),
 
@@ -588,11 +662,14 @@ fn array_expr(p: &mut Parser<'_>) -> CompletedMarker {
 //     for<'a> move || {};
 // }
 fn closure_expr(p: &mut Parser<'_>) -> CompletedMarker {
-    assert!(match p.current() {
-        T![const] | T![static] | T![async] | T![move] | T![|] => true,
-        T![for] => p.nth(1) == T![<],
-        _ => false,
-    });
+    assert!(
+        p.at_contextual_kw(T![proof_fn])
+            || match p.current() {
+                T![const] | T![static] | T![async] | T![move] | T![|] => true,
+                T![for] => p.nth(1) == T![<],
+                _ => false,
+            }
+    );
 
     let m = p.start();
 
@@ -608,13 +685,17 @@ fn closure_expr(p: &mut Parser<'_>) -> CompletedMarker {
     p.eat(T![async]);
     p.eat(T![gen]);
     p.eat(T![move]);
+    // verus
+    if p.at_contextual_kw(T![proof_fn]) {
+        verus::proof_fn(p);
+    }
 
     if !p.at(T![|]) {
         p.error("expected `|`");
         return m.complete(p, CLOSURE_EXPR);
     }
     params::param_list_closure(p);
-    if opt_ret_type(p) {
+    if verus::verus_ret_type(p) {
         // test_err closure_ret_recovery
         // fn foo() { || -> A> { let x = 1; } }
         while p.at(T![>]) {
@@ -623,10 +704,23 @@ fn closure_expr(p: &mut Parser<'_>) -> CompletedMarker {
         }
         // test lambda_ret_block
         // fn main() { || -> i32 { 92 }(); }
+        if p.at_contextual_kw(T![requires]) {
+            // verus: requires/ensures clauses on the closure
+            verus::requires(p);
+        }
+        if p.at_contextual_kw(T![ensures]) {
+            verus::ensures(p);
+        }
         block_expr(p);
     } else if p.at_ts(EXPR_FIRST) {
         // test closure_body_underscore_assignment
         // fn main() { || _ = 0; }
+        if p.at_contextual_kw(T![requires]) {
+            verus::requires(p);
+        }
+        if p.at_contextual_kw(T![ensures]) {
+            verus::ensures(p);
+        }
         expr(p);
     } else {
         p.error("expected expression");
@@ -680,6 +774,19 @@ fn loop_expr(p: &mut Parser<'_>, m: Option<Marker>) -> CompletedMarker {
     assert!(p.at(T![loop]));
     let m = m.unwrap_or_else(|| p.start());
     p.bump(T![loop]);
+    // verus
+    if p.at_contextual_kw(T![invariant_except_break]) {
+        verus::invariants_except_break(p);
+    }
+    if p.at_contextual_kw(T![invariant]) {
+        verus::invariants(p);
+    }
+    if p.at_contextual_kw(T![ensures]) {
+        verus::ensures(p);
+    }
+    if p.at_contextual_kw(T![decreases]) {
+        verus::decreases(p);
+    }
     block_expr(p);
     m.complete(p, LOOP_EXPR)
 }
@@ -695,6 +802,19 @@ fn while_expr(p: &mut Parser<'_>, m: Option<Marker>) -> CompletedMarker {
     let m = m.unwrap_or_else(|| p.start());
     p.bump(T![while]);
     expr_no_struct(p);
+    // verus
+    if p.at_contextual_kw(T![invariant_except_break]) {
+        verus::invariants_except_break(p);
+    }
+    if p.at_contextual_kw(T![invariant]) {
+        verus::invariants(p);
+    }
+    if p.at_contextual_kw(T![ensures]) {
+        verus::ensures(p);
+    }
+    if p.at_contextual_kw(T![decreases]) {
+        verus::decreases(p);
+    }
     block_expr(p);
     m.complete(p, WHILE_EXPR)
 }
@@ -709,7 +829,27 @@ fn for_expr(p: &mut Parser<'_>, m: Option<Marker>) -> CompletedMarker {
     p.bump(T![for]);
     patterns::pattern(p);
     p.expect(T![in]);
+    // verus: optionally name the iterator with `for x in name: iter ...`
+    if p.at(IDENT) && p.nth_at(1, T![:]) && !p.nth_at(1, T![::]) {
+        let m = p.start();
+        p.bump(IDENT);
+        m.complete(p, NAME);
+        p.expect(T![:]);
+    }
     expr_no_struct(p);
+    // verus
+    if p.at_contextual_kw(T![invariant_except_break]) {
+        verus::invariants_except_break(p);
+    }
+    if p.at_contextual_kw(T![invariant]) {
+        verus::invariants(p);
+    }
+    if p.at_contextual_kw(T![ensures]) {
+        verus::ensures(p);
+    }
+    if p.at_contextual_kw(T![decreases]) {
+        verus::decreases(p);
+    }
     block_expr(p);
     m.complete(p, FOR_EXPR)
 }

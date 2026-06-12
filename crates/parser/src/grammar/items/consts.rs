@@ -49,7 +49,8 @@ fn const_or_static(p: &mut Parser<'_>, m: Marker, is_const: bool) {
         // static C = 0;
         p.error("missing type for `static`");
     }
-    if p.eat(T![=]) {
+    let has_value = p.eat(T![=]);
+    if has_value {
         expressions::expr(p);
     }
 
@@ -66,6 +67,11 @@ fn const_or_static(p: &mut Parser<'_>, m: Marker, is_const: bool) {
     // static C: u32 = 0
     // where i32: Copy;
 
-    p.expect(T![;]);
+    if !has_value && p.at_contextual_kw(T![ensures]) {
+        verus::ensures(p);
+        expressions::block_expr(p);
+    } else {
+        p.expect(T![;]);
+    }
     m.complete(p, if is_const { CONST } else { STATIC });
 }

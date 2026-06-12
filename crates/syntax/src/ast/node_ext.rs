@@ -169,6 +169,7 @@ impl From<ast::AssocItem> for ast::Item {
             ast::AssocItem::Fn(it) => ast::Item::Fn(it),
             ast::AssocItem::MacroCall(it) => ast::Item::MacroCall(it),
             ast::AssocItem::TypeAlias(it) => ast::Item::TypeAlias(it),
+            ast::AssocItem::BroadcastGroup(it) => ast::Item::BroadcastGroup(it),
         }
     }
 }
@@ -1263,5 +1264,15 @@ impl Iterator for TokenTreeChildren {
                 .then_some(NodeOrToken::Token(token))
             }
         })
+    }
+}
+
+impl ast::AssertForallExpr {
+    pub fn exprs(&self) -> ast::AstChildren<ast::Expr> {
+        support::children(&self.syntax)
+    }
+
+    pub fn block_exprs(&self) -> ast::AstChildren<ast::BlockExpr> {
+        support::children(&self.syntax)
     }
 }

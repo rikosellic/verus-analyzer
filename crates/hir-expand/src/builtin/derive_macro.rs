@@ -1499,6 +1499,8 @@ fn coerce_pointee_expand(
                 .ty()
                 .is_some_and(|ty| substitute_type_in_bound(editor, ty, param_name, replacement)),
             ast::Type::InferType(_) | ast::Type::MacroType(_) | ast::Type::NeverType(_) => false,
+            // Verus `proof_fn` types do not participate in derive bound substitution.
+            ast::Type::ProofFnType(_) => false,
         };
 
         fn go_bounds(

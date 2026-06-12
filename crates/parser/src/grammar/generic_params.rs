@@ -264,6 +264,10 @@ pub(super) fn opt_where_clause(p: &mut Parser<'_>) {
             _ => (),
         }
 
+        if verus::at_signature_clause_kw(p) {
+            break;
+        }
+
         if !comma {
             p.error("expected comma");
         }
@@ -272,6 +276,9 @@ pub(super) fn opt_where_clause(p: &mut Parser<'_>) {
     m.complete(p, WHERE_CLAUSE);
 
     fn is_where_predicate(p: &mut Parser<'_>) -> bool {
+        if verus::at_signature_clause_kw(p) {
+            return false;
+        }
         match p.current() {
             LIFETIME_IDENT => true,
             T![impl] => false,

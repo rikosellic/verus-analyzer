@@ -1,0 +1,105 @@
+SOURCE_FILE
+  FN
+    FN_MODE
+      PROOF_KW "proof"
+    WHITESPACE " "
+    FN_KW "fn"
+    WHITESPACE " "
+    NAME
+      IDENT "f"
+    PARAM_LIST
+      L_PAREN "("
+      R_PAREN ")"
+    WHITESPACE " "
+    RET_TYPE
+      THIN_ARROW "->"
+      WHITESPACE " "
+      L_PAREN "("
+      TRACKED_KW "tracked"
+      WHITESPACE " "
+      TUPLE_PAT
+        L_PAREN "("
+        IDENT_PAT
+          NAME
+            IDENT "x"
+        COMMA ","
+        WHITESPACE " "
+        IDENT_PAT
+          NAME
+            IDENT "y"
+        R_PAREN ")"
+      COLON ":"
+      WHITESPACE " "
+      TUPLE_TYPE
+        L_PAREN "("
+        PATH_TYPE
+          PATH
+            PATH_SEGMENT
+              NAME_REF
+                IDENT "A"
+        COMMA ","
+        WHITESPACE " "
+        PATH_TYPE
+          PATH
+            PATH_SEGMENT
+              NAME_REF
+                IDENT "B"
+        R_PAREN ")"
+      R_PAREN ")"
+    WHITESPACE " "
+    BLOCK_EXPR
+      STMT_LIST
+        L_CURLY "{"
+        R_CURLY "}"
+  WHITESPACE "\n"
+  FN
+    FN_MODE
+      EXEC_KW "exec"
+    WHITESPACE " "
+    FN_KW "fn"
+    WHITESPACE " "
+    NAME
+      IDENT "f"
+    PARAM_LIST
+      L_PAREN "("
+      R_PAREN ")"
+    WHITESPACE " "
+    RET_TYPE
+      THIN_ARROW "->"
+      WHITESPACE " "
+      L_PAREN "("
+      TUPLE_PAT
+        L_PAREN "("
+        IDENT_PAT
+          NAME
+            IDENT "res"
+        COMMA ","
+        WHITESPACE " "
+        IDENT_PAT
+          NAME
+            IDENT "perm"
+        R_PAREN ")"
+      COLON ":"
+      WHITESPACE " "
+      TUPLE_TYPE
+        L_PAREN "("
+        PATH_TYPE
+          PATH
+            PATH_SEGMENT
+              NAME_REF
+                IDENT "A"
+        COMMA ","
+        WHITESPACE " "
+        PATH_TYPE
+          PATH
+            PATH_SEGMENT
+              NAME_REF
+                IDENT "B"
+        R_PAREN ")"
+      R_PAREN ")"
+    WHITESPACE " "
+    BLOCK_EXPR
+      STMT_LIST
+        L_CURLY "{"
+        R_CURLY "}"
+  WHITESPACE "\n"
