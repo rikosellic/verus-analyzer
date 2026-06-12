@@ -362,7 +362,7 @@ pub(crate) fn convert_diagnostic(
         code_description: Some(lsp_types::CodeDescription {
             href: lsp_types::Uri::parse(&d.code.url()).unwrap(),
         }),
-        source: Some("rust-analyzer".to_owned()),
+        source: Some("verus-analyzer".to_owned()),
         message: lsp_types::Message::String(d.message),
         related_information: None,
         tags: d.unused.then(|| vec![lsp_types::DiagnosticTag::Unnecessary]),

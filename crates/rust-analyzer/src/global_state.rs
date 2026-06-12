@@ -116,6 +116,9 @@ pub(crate) struct GlobalState {
     pub(crate) last_flycheck_error: Option<String>,
     pub(crate) flycheck_formatted_commands: Vec<String>,
 
+    /// verus
+    pub(crate) verus_errors: Vec<ide::proof_plumber_api::verus_error::VerusError>,
+
     // Test explorer
     pub(crate) test_run_session: Option<Vec<CargoTestHandle>>,
     pub(crate) test_run_sender: Sender<CargoTestMessage>,
@@ -219,6 +222,8 @@ pub(crate) struct GlobalStateSnapshot {
     // FIXME: Can we derive this from somewhere else?
     pub(crate) proc_macros_loaded: bool,
     pub(crate) flycheck: Arc<[FlycheckHandle]>,
+    // verus
+    pub(crate) verus_errors: Vec<ide::proof_plumber_api::verus_error::VerusError>,
     minicore: MiniCoreRustAnalyzerInternalOnly,
 }
 
@@ -292,6 +297,8 @@ impl GlobalState {
             flycheck_receiver,
             last_flycheck_error: None,
             flycheck_formatted_commands: vec![],
+
+            verus_errors: Vec::new(),
 
             test_run_session: None,
             test_run_sender,
@@ -579,6 +586,7 @@ impl GlobalState {
             proc_macros_loaded: !self.config.expand_proc_macros()
                 || self.fetch_proc_macros_queue.last_op_result().copied().unwrap_or(false),
             flycheck: self.flycheck.clone(),
+            verus_errors: self.verus_errors.clone(),
         }
     }
 

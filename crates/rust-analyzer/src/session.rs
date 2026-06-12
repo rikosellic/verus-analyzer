@@ -127,7 +127,7 @@ pub fn run_session(
     let initialize_result = lsp_types::InitializeResult {
         capabilities: server_capabilities,
         server_info: Some(lsp_types::ServerInfo {
-            name: String::from("rust-analyzer"),
+            name: String::from("verus-analyzer"),
             version: Some(crate::version().to_string()),
         }),
     };

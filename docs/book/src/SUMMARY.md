@@ -11,6 +11,7 @@
   - [Non-Cargo Based Projects](non_cargo_based_projects.md)
 - [Security](security.md)
 - [Privacy](privacy.md)
+- [Differences from Upstream Verus Analyzer](rebased-differences.md)
 - [Features](features.md)
   - [Assists (Code Actions)](assists.md)
   - [Diagnostics](diagnostics.md)

@@ -112,6 +112,7 @@ in-rust-tree = [
   "syntax/in-rust-tree",
 ]
 dhat = ["dep:dhat"]
+proof-action = ["ide/proof-action"]
 
 [lints]
 workspace = true

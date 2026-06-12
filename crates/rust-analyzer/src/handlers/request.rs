@@ -509,7 +509,7 @@ pub(crate) fn empty_diagnostic_report() -> lsp_types::DocumentDiagnosticReport {
         lsp_types::RelatedFullDocumentDiagnosticReport {
             related_documents: None,
             full_document_diagnostic_report: lsp_types::FullDocumentDiagnosticReport {
-                result_id: Some("rust-analyzer".to_owned()),
+                result_id: Some("verus-analyzer".to_owned()),
                 items: vec![],
             },
         },
@@ -559,7 +559,7 @@ pub(crate) fn handle_document_diagnostics(
     Ok(lsp_types::DocumentDiagnosticReport::RelatedFullDocumentDiagnosticReport(
         lsp_types::RelatedFullDocumentDiagnosticReport {
             full_document_diagnostic_report: lsp_types::FullDocumentDiagnosticReport {
-                result_id: Some("rust-analyzer".to_owned()),
+                result_id: Some("verus-analyzer".to_owned()),
                 items: diagnostics.collect(),
             },
             related_documents: related_documents.is_empty().not().then(|| {
@@ -570,7 +570,7 @@ pub(crate) fn handle_document_diagnostics(
                             to_proto::url(&snap, id),
                             lsp_types::RelatedDocument::FullDocumentDiagnosticReport(
                                 lsp_types::FullDocumentDiagnosticReport {
-                                    result_id: Some("rust-analyzer".to_owned()),
+                                    result_id: Some("verus-analyzer".to_owned()),
                                     items,
                                 },
                             ),
@@ -1531,12 +1531,15 @@ pub(crate) fn handle_code_action(
     } else {
         AssistResolveStrategy::All
     };
-    let assists = snap.analysis.assists_with_fixes(
-        &assists_config,
-        &snap.config.diagnostic_fixes(Some(source_root)),
-        resolve,
-        frange,
-    )?;
+    let assists = {
+        snap.analysis.assists_with_fixes_and_verus_errors(
+            &assists_config,
+            &snap.config.diagnostic_fixes(Some(source_root)),
+            resolve,
+            frange,
+            snap.verus_errors.clone(),
+        )?
+    };
     let client_commands = snap.config.client_commands();
     for (index, assist) in assists.into_iter().enumerate() {
         let resolve_data = if code_action_resolve_cap {
@@ -1624,12 +1627,15 @@ pub(crate) fn handle_code_action_resolve(
     let expected_assist_id = assist_resolve.assist_id.clone();
     let expected_kind = assist_resolve.assist_kind;
 
-    let assists = snap.analysis.assists_with_fixes(
-        &assists_config,
-        &snap.config.diagnostic_fixes(Some(source_root)),
-        AssistResolveStrategy::Single(assist_resolve),
-        frange,
-    )?;
+    let assists = {
+        snap.analysis.assists_with_fixes_and_verus_errors(
+            &assists_config,
+            &snap.config.diagnostic_fixes(Some(source_root)),
+            AssistResolveStrategy::Single(assist_resolve),
+            frange,
+            snap.verus_errors.clone(),
+        )?
+    };
 
     let assist = match assists.get(assist_index) {
         Some(assist) => assist,

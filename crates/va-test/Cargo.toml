@@ -1,0 +1,25 @@
+[package]
+name = "va-test"
+version = "0.0.0"
+description = "Directly test the Verus Analyzer server"
+publish = false
+
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap = { version = "4.5.42", features = ["derive"] }
+
+# local deps
+base-db.workspace = true
+hir.workspace = true
+load-cargo.workspace = true
+project-model.workspace = true
+syntax.workspace = true
+vfs.workspace = true
+
+[lints]
+workspace = true

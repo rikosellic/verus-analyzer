@@ -35,12 +35,72 @@ export async function activate(
     // so we do it ourselves.
     const api = await activateServer(ctx).catch((err) => {
         void vscode.window.showErrorMessage(
-            `Cannot activate rust-analyzer extension: ${err.message}`,
+            `Cannot activate verus-analyzer extension: ${err.message}`,
         );
         throw err;
     });
     await setContextValue(RUST_PROJECT_CONTEXT_NAME, true);
+    registerVerusCommands(context, ctx);
     return api;
+}
+
+function registerVerusCommands(context: vscode.ExtensionContext, ctx: Ctx) {
+    const fold = vscode.commands.registerCommand("verus-analyzer.foldProofBlocks", async () => {
+        await foldOrUnfoldProofBlocks(ctx, "fold");
+    });
+    const unfold = vscode.commands.registerCommand("verus-analyzer.unfoldProofBlocks", async () => {
+        await foldOrUnfoldProofBlocks(ctx, "unfold");
+    });
+    context.subscriptions.push(fold, unfold);
+}
+
+async function foldOrUnfoldProofBlocks(ctx: Ctx, mode: "fold" | "unfold") {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+
+    const client = ctx.client;
+    if (!client) return;
+
+    // VS Code's `executeFoldingRangeProvider` strips the `collapsedText`
+    // field, so query the language client directly to preserve it.
+    type ProofRange = {
+        startLine: number;
+        endLine: number;
+        kind?: string;
+        collapsedText?: string;
+    };
+    const ranges = (await client.sendRequest("textDocument/foldingRange", {
+        textDocument: client.code2ProtocolConverter.asTextDocumentIdentifier(editor.document),
+    })) as ProofRange[] | null;
+    if (!ranges) return;
+
+    const proofRanges = ranges.filter(
+        (r) => r.kind === "region" && r.collapsedText?.trimEnd().endsWith("proof_block"),
+    );
+    if (proofRanges.length === 0) return;
+
+    if (mode === "unfold") {
+        const lines = [...new Set(proofRanges.map((r) => r.startLine))];
+        await vscode.commands.executeCommand("editor.unfold", { selectionLines: lines });
+        return;
+    }
+
+    // Fold inner blocks first, then outer blocks; keep only multiline
+    // ranges and deduplicate by start line so repeated runs are idempotent.
+    const sortedLines = [
+        ...new Set(
+            proofRanges
+                .filter((r) => r.endLine > r.startLine)
+                .sort((a, b) => a.endLine - a.startLine - (b.endLine - b.startLine))
+                .map((r) => r.startLine),
+        ),
+    ];
+    if (sortedLines.length === 0) return;
+
+    await vscode.commands.executeCommand("editor.unfold", { selectionLines: sortedLines });
+    for (const line of sortedLines) {
+        await vscode.commands.executeCommand("editor.fold", { selectionLines: [line] });
+    }
 }
 
 async function activateServer(ctx: Ctx): Promise<RustAnalyzerExtensionApi> {
@@ -230,7 +290,7 @@ function checkConflictingExtensions() {
     if (vscode.extensions.getExtension("rust-lang.rust")) {
         vscode.window
             .showWarningMessage(
-                `You have both the rust-analyzer (rust-lang.rust-analyzer) and Rust (rust-lang.rust) ` +
+                `You have both the verus-analyzer (verus-lang.verus-analyzer) and Rust (rust-lang.rust) ` +
                     "plugins enabled. These are known to conflict and cause various functions of " +
                     "both plugins to not work correctly. You should disable one of them.",
                 "Got it",

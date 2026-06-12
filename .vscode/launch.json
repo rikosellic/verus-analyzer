@@ -10,6 +10,23 @@
   "version": "0.2.0",
   "configurations": [
     {
+      // Used for testing the Verus Analyzer server.
+      "name": "Debug Verus Analyzer server",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/va-test",
+      "sourceLanguages": [
+        "rust"
+      ],
+      "args": [
+        //"${workspaceFolder}/crates/va-test/examples/storage"
+        "${workspaceFolder}/crates/va-test/examples/misc-parsing"
+        //"${workspaceFolder}/crates/va-test/examples/trigger-bug"
+        //"${workspaceFolder}/crates/va-test/examples/vstd-dep"
+      ],
+      "preLaunchTask": "Build Server",
+    },
+    {
       // Used for testing the extension with the installed LSP server.
       "name": "Run Installed Extension",
       "type": "extensionHost",
@@ -107,7 +124,7 @@
       "name": "Attach To Server",
       "type": "lldb",
       "request": "attach",
-      "program": "${workspaceFolder}/target/debug/rust-analyzer",
+      "program": "${workspaceFolder}/target/debug/verus-analyzer",
       "pid": "${command:pickMyProcess}",
       "sourceLanguages": [
         "rust"

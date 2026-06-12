@@ -18,7 +18,6 @@ pub enum FoldKind {
     Comment,
     Imports,
     Region,
-    ProofBlock,
     Block,
     ArgList,
     Array,
@@ -26,6 +25,11 @@ pub enum FoldKind {
     ReturnType,
     MatchArm,
     Function,
+    /// Verus proof block: `proof { .. }`, `proof! { .. }`, `proof_decl! { .. }`,
+    /// `assert(..) by { .. }`, `proof fn .. { .. }`, and `ghost name => { .. }`
+    /// inside `atomic_with_ghost!`. Always reported as `Region` with the
+    /// `proof_block` collapsed text so the TS client can fold them as a group.
+    ProofBlock,
     // region: item runs
     Modules,
     Consts,
@@ -76,6 +80,20 @@ pub(crate) fn folding_ranges(file: &SourceFile, add_collapsed_text: bool) -> Vec
             };
 
             if is_multiline {
+                // Verus proof blocks: re-tag as ProofBlock and fold only the
+                // inner brace-delimited region so the client can fold them
+                // as a logical group via the `proof_block` collapsed text.
+                let mut kind = kind;
+                let mut effective_range = element.text_range();
+                if let NodeOrToken::Node(node) = &element
+                    && is_proof_block(node)
+                {
+                    kind = FoldKind::ProofBlock;
+                    if let Some(inner) = proof_block_inner_range(node) {
+                        effective_range = inner;
+                    }
+                }
+
                 if let NodeOrToken::Node(node) = &element
                     && let Some(fn_) = ast::Fn::cast(node.clone())
                 {
@@ -101,7 +119,12 @@ pub(crate) fn folding_ranges(file: &SourceFile, add_collapsed_text: bool) -> Vec
                     }
                 }
 
-                let fold = Fold::new(element.text_range(), kind).with_text(collapsed_text);
+                let collapsed_text = if matches!(kind, FoldKind::ProofBlock) && add_collapsed_text {
+                    Some("proof_block".to_owned())
+                } else {
+                    collapsed_text
+                };
+                let fold = Fold::new(effective_range, kind).with_text(collapsed_text);
                 res.push(fold);
                 continue;
             }
@@ -200,13 +223,6 @@ fn fold_kind(
         ));
     }
 
-    if element.kind() == BLOCK_EXPR
-        && let Some(block) = element.as_node().and_then(|node| ast::BlockExpr::cast(node.clone()))
-        && matches!(block.modifier(), Some(ast::BlockModifier::Proof(_)))
-    {
-        return Some((FoldKind::ProofBlock, None));
-    }
-
     match element.kind() {
         COMMENT => Some(FoldKind::Comment),
         ARG_LIST | PARAM_LIST | GENERIC_ARG_LIST | GENERIC_PARAM_LIST => Some(FoldKind::ArgList),
@@ -278,6 +294,89 @@ fn collapsed_stmt(stmt: ast::Stmt) -> Option<String> {
         // handling `items` in external matches.
         ast::Stmt::Item(_) => None,
     }
+}
+
+/// Detects Verus proof blocks. Recognizes:
+/// - `proof { .. }` (BLOCK_EXPR with a `FN_MODE` child containing `proof`)
+/// - `proof! { .. }` (parent PREFIX_EXPR with PROOF_KW + BANG)
+/// - `proof fn foo() { .. }` body (parent FN with PROOF_KW)
+/// - `assert(..) by { .. }` (parent ASSERT_EXPR with `by`)
+/// - `proof_decl! { .. }` (TOKEN_TREE inside `proof_decl!` MACRO_CALL)
+/// - `ghost name => { .. }` inside `atomic_with_ghost!` (TOKEN_TREE preceded
+///   by a `ghost` keyword inside a parent TOKEN_TREE)
+fn is_proof_block(node: &SyntaxNode) -> bool {
+    use syntax::SyntaxKind as K;
+    match node.kind() {
+        BLOCK_EXPR => {
+            if node.children_with_tokens().any(|it| it.kind() == K::PROOF_KW) {
+                return true;
+            }
+            if node.children().any(|child| {
+                child.kind() == K::FN_MODE
+                    && child.children_with_tokens().any(|it| it.kind() == K::PROOF_KW)
+            }) {
+                return true;
+            }
+            if let Some(parent) = node.parent() {
+                if parent.kind() == K::PREFIX_EXPR {
+                    let has_proof_mode = parent.children().any(|child| {
+                        child.kind() == K::FN_MODE
+                            && child.children_with_tokens().any(|it| it.kind() == K::PROOF_KW)
+                    });
+                    let has_bang = parent.children_with_tokens().any(|it| it.kind() == K::BANG);
+                    return has_proof_mode && has_bang;
+                }
+                if parent.kind() == K::ASSERT_EXPR {
+                    return parent.children_with_tokens().any(|it| it.kind() == K::BY_KW);
+                }
+                if parent.kind() == K::FN {
+                    return parent.children().any(|child| {
+                        child.kind() == K::FN_MODE
+                            && child.children_with_tokens().any(|it| it.kind() == K::PROOF_KW)
+                    });
+                }
+            }
+            false
+        }
+        TOKEN_TREE => {
+            let Some(parent) = node.parent() else { return false };
+            if parent.kind() == K::MACRO_CALL {
+                return parent.children().any(|child| {
+                    child.kind() == K::PATH
+                        && matches!(child.text().to_string().trim(), "proof" | "proof_decl")
+                });
+            }
+            if parent.kind() == TOKEN_TREE {
+                let starts_with_curly =
+                    node.children_with_tokens().next().is_some_and(|it| it.kind() == K::L_CURLY);
+                if starts_with_curly {
+                    let mut sib = node.prev_sibling_or_token();
+                    while let Some(s) = sib {
+                        if s.kind() == K::GHOST_KW
+                            || s.as_token().is_some_and(|token| token.text() == "ghost")
+                        {
+                            return true;
+                        }
+                        sib = s.prev_sibling_or_token();
+                    }
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+/// For BLOCK_EXPR proof blocks, narrow the fold range to the L_CURLY of the
+/// inner `STMT_LIST` so that wrapper tokens like `proof`, `by`, `proof!`
+/// stay visible above the fold. For TOKEN_TREE proof blocks the node's own
+/// range already starts at the curly.
+fn proof_block_inner_range(node: &SyntaxNode) -> Option<TextRange> {
+    if node.kind() == BLOCK_EXPR {
+        let l_curly = node.descendants_with_tokens().find(|it| it.kind() == L_CURLY)?;
+        return Some(TextRange::new(l_curly.text_range().start(), node.text_range().end()));
+    }
+    None
 }
 
 fn collapse_expr(expr: ast::Expr) -> Option<String> {
@@ -512,7 +611,6 @@ mod tests {
                 FoldKind::Block => "block",
                 FoldKind::ArgList => "arglist",
                 FoldKind::Region => "region",
-                FoldKind::ProofBlock => "proofblock",
                 FoldKind::Consts => "consts",
                 FoldKind::Statics => "statics",
                 FoldKind::TypeAliases => "typealiases",
@@ -524,6 +622,7 @@ mod tests {
                 FoldKind::ExternCrates => "externcrates",
                 FoldKind::Stmt => "stmt",
                 FoldKind::TailExpr => "tailexpr",
+                FoldKind::ProofBlock => "proof_block",
             };
             assert_eq!(kind, &attr.unwrap());
             if enable_collapsed_text {
@@ -547,6 +646,90 @@ mod tests {
 
 
 }</fold></fold>
+"#,
+        );
+    }
+
+    #[test]
+    fn fold_proof_block() {
+        check(
+            r#"
+fn main() <fold block>{
+    proof <fold proof_block:proof_block>{
+        assert(true);
+    }</fold>
+}</fold>
+"#,
+        );
+    }
+
+    #[test]
+    fn fold_proof_bang_block() {
+        check(
+            r#"
+fn main() <fold block>{
+    <fold tailexpr>proof! <fold proof_block:proof_block>{
+        assert(true);
+    }</fold></fold>
+}</fold>
+"#,
+        );
+    }
+
+    #[test]
+    fn fold_proof_decl_block() {
+        check(
+            r#"
+fn main() <fold block>{
+    <fold tailexpr>proof_decl! <fold proof_block:proof_block>{
+        let tracked mut g = 0u32;
+    }</fold></fold>
+}</fold>
+"#,
+        );
+    }
+
+    #[test]
+    fn fold_atomic_with_ghost_block() {
+        check(
+            r#"
+fn main() <fold block>{
+    let value = AtomicBool::new(0);
+    <fold stmt>atomic_with_ghost! <fold block>(
+        value => compare_exchange(false, true);
+        returning res;
+        ghost g => <fold proof_block:proof_block>{
+            assert(true);
+        }</fold>
+    )</fold>;</fold>
+}</fold>
+"#,
+        );
+    }
+
+    #[test]
+    fn fold_assert_by_block() {
+        check(
+            r#"
+fn main() <fold block>{
+    <fold stmt>assert(1 > 0) by <fold proof_block:proof_block>{
+        assert(true);
+    }</fold>;</fold>
+}</fold>
+"#,
+        );
+    }
+
+    #[test]
+    fn fold_proof_fn_body() {
+        check(
+            r#"
+proof fn helper()
+    requires false,
+    ensures true,
+    <fold proof_block:proof_block>{
+    assert(true);
+}</fold>
 "#,
         );
     }

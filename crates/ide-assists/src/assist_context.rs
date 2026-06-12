@@ -50,7 +50,10 @@ pub(crate) struct AssistContext<'a, 'db> {
     pub(crate) sema: Semantics<'db, RootDatabase>,
     frange: FileRange,
     trimmed_range: TextRange,
-    source_file: SourceFile,
+    pub source_file: SourceFile,
+    /// Diagnostics produced by Verus, attached to this context for use by
+    /// proof_action assists.
+    pub verus_errors: Vec<crate::proof_plumber_api::verus_error::VerusError>,
     // We cache this here to speed up things slightly
     token_at_offset: TokenAtOffset<SyntaxToken>,
     // We cache this here to speed up things slightly
@@ -59,6 +62,25 @@ pub(crate) struct AssistContext<'a, 'db> {
 
 impl<'a, 'db> AssistContext<'a, 'db> {
     pub(crate) fn new(
+        sema: Semantics<'db, RootDatabase>,
+        config: &'a AssistConfig,
+        frange: FileRange,
+    ) -> AssistContext<'a, 'db> {
+        Self::new_with_verus_errors(sema, config, frange, Vec::new())
+    }
+
+    pub fn new_with_verus_errors(
+        sema: Semantics<'db, RootDatabase>,
+        config: &'a AssistConfig,
+        frange: FileRange,
+        verus_errors: Vec<crate::proof_plumber_api::verus_error::VerusError>,
+    ) -> AssistContext<'a, 'db> {
+        let mut ctx = Self::build(sema, config, frange);
+        ctx.verus_errors = verus_errors;
+        ctx
+    }
+
+    fn build(
         sema: Semantics<'db, RootDatabase>,
         config: &'a AssistConfig,
         frange: FileRange,
@@ -89,6 +111,7 @@ impl<'a, 'db> AssistContext<'a, 'db> {
             sema,
             frange,
             source_file,
+            verus_errors: Vec::new(),
             trimmed_range,
             token_at_offset,
             covering_element,
@@ -147,6 +170,11 @@ impl<'a, 'db> AssistContext<'a, 'db> {
     }
     pub(crate) fn find_node_at_range<N: AstNode>(&self) -> Option<N> {
         find_node_at_range(self.source_file.syntax(), self.trimmed_range)
+    }
+    // verus
+    /// Like [`find_node_at_range`], but for an arbitrary range supplied by the caller.
+    pub fn find_node_at_given_range<N: AstNode>(&self, range: TextRange) -> Option<N> {
+        find_node_at_range(self.source_file.syntax(), range)
     }
     pub(crate) fn find_node_at_offset_with_descend<N: AstNode>(&self) -> Option<N> {
         self.sema.find_node_at_offset_with_descend(self.source_file.syntax(), self.offset())

@@ -102,11 +102,19 @@ pub(crate) fn build_command<'a>(
     command: &str,
     target_name: &str,
     features: &[&str],
+    proof_action: bool,
 ) -> Cmd<'a> {
-    cmd!(
-        sh,
-        "cargo {command} --manifest-path ./crates/rust-analyzer/Cargo.toml --bin rust-analyzer --target {target_name} {features...} --release"
-    )
+    if proof_action {
+        cmd!(
+            sh,
+            "cargo {command} --manifest-path ./crates/rust-analyzer/Cargo.toml --bin rust-analyzer --target {target_name} {features...} --release --features proof-action"
+        )
+    } else {
+        cmd!(
+            sh,
+            "cargo {command} --manifest-path ./crates/rust-analyzer/Cargo.toml --bin rust-analyzer --target {target_name} {features...} --release"
+        )
+    }
 }
 
 pub(crate) fn apply_pgo_to_cmd<'a>(cmd: Cmd<'a>, profile_path: &Path) -> Cmd<'a> {

@@ -234,7 +234,7 @@ pub(crate) fn handle_did_change_configuration(
         lsp_types::ConfigurationParams {
             items: vec![lsp_types::ConfigurationItem {
                 scope_uri: None,
-                section: Some("rust-analyzer".to_owned()),
+                section: Some("verus-analyzer".to_owned()),
             }],
         },
         |this, resp| {

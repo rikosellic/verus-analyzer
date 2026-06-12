@@ -26,6 +26,11 @@ syntax.workspace = true
 ide-db.workspace = true
 hir.workspace = true
 
+# verusfmt = { git = "https://github.com/verus-lang/verusfmt.git", branch = "optional-updater", default-features = false }
+verusfmt = { version = "0.7.0", default-features = false }
+tempfile = "3.10.1"
+test-fixture.workspace = true
+
 [dev-dependencies]
 expect-test = "1.5.1"
 
@@ -35,6 +40,7 @@ test-fixture.workspace = true
 
 [features]
 in-rust-tree = []
+proof-action = []
 
 [lints]
 workspace = true

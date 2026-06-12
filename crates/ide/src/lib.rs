@@ -125,6 +125,7 @@ pub use crate::{
     test_explorer::{TestItem, TestItemKind},
 };
 pub use hir::{PredicateEvaluationResult, PredicateEvaluationStatus, Semantics};
+pub use ide_assists::proof_plumber_api;
 pub use ide_assists::{
     Assist, AssistConfig, AssistId, AssistKind, AssistResolveStrategy, SingleResolve,
 };
@@ -855,6 +856,53 @@ impl Analysis {
             };
             let ssr_assists = ssr::ssr_assists(db, &resolve, frange);
             let assists = ide_assists::assists(db, assist_config, resolve, frange);
+
+            let mut res = diagnostic_assists;
+            res.extend(ssr_assists);
+            res.extend(assists);
+
+            res
+        })
+    }
+
+    /// Verus: same as [`Self::assists_with_fixes`] but additionally threads the
+    /// latest verus errors into the assist computation so that proof-action
+    /// handlers can locate the failing assertion / pre/post-condition.
+    pub fn assists_with_fixes_and_verus_errors(
+        &self,
+        assist_config: &AssistConfig,
+        diagnostics_config: &DiagnosticsConfig,
+        resolve: AssistResolveStrategy,
+        frange: FileRange,
+        verus_errors: Vec<ide_assists::proof_plumber_api::verus_error::VerusError>,
+    ) -> Cancellable<Vec<Assist>> {
+        let include_fixes = match &assist_config.allowed {
+            Some(it) => it.contains(&AssistKind::QuickFix),
+            None => true,
+        };
+
+        self.with_db(|db| {
+            let diagnostic_assists = if diagnostics_config.enabled && include_fixes {
+                ide_diagnostics::full_diagnostics(db, diagnostics_config, &resolve, frange.file_id)
+                    .into_iter()
+                    .flat_map(|it| it.fixes.unwrap_or_default())
+                    .filter(|it| it.target.intersect(frange.range).is_some())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let ssr_assists = ssr::ssr_assists(db, &resolve, frange);
+            let assists = if verus_errors.is_empty() {
+                ide_assists::assists(db, assist_config, resolve, frange)
+            } else {
+                ide_assists::assists_with_verus_error(
+                    db,
+                    assist_config,
+                    resolve,
+                    frange,
+                    verus_errors,
+                )
+            };
 
             let mut res = diagnostic_assists;
             res.extend(ssr_assists);

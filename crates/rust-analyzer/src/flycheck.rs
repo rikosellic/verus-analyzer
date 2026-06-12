@@ -154,6 +154,12 @@ pub(crate) enum FlycheckConfig {
         extra_env: FxHashMap<String, Option<String>>,
         invocation_strategy: InvocationStrategy,
     },
+    VerusCommand {
+        verus_args: Vec<String>,
+        cargo_verus_enable: bool,
+        cargo_options: CargoOptions,
+        report_all_errors: bool,
+    },
 }
 
 impl FlycheckConfig {
@@ -163,6 +169,7 @@ impl FlycheckConfig {
             FlycheckConfig::CustomCommand { invocation_strategy, .. } => {
                 invocation_strategy.clone()
             }
+            FlycheckConfig::VerusCommand { .. } => InvocationStrategy::PerWorkspace,
         }
     }
 }
@@ -198,6 +205,21 @@ impl fmt::Display for FlycheckConfig {
                     .collect::<Vec<_>>();
 
                 write!(f, "{command} {}", display_args.join(" "))
+            }
+            FlycheckConfig::VerusCommand {
+                verus_args,
+                cargo_verus_enable,
+                cargo_options,
+                report_all_errors,
+            } => {
+                write!(
+                    f,
+                    "verus {} (cargo_verus enabled:{}, cargo_verus options {:?}, report all errors: {})",
+                    verus_args.join(" "),
+                    cargo_verus_enable,
+                    cargo_options,
+                    report_all_errors
+                )
             }
         }
     }
@@ -364,6 +386,9 @@ pub(crate) enum Progress {
     DidFinish(io::Result<()>),
     DidCancel,
     DidFailToRestart(String),
+    /// A summary line from `verus` (typically `verification results::`).
+    /// Surfaced as an LSP `ShowMessage` notification.
+    VerusResult(String),
 }
 
 #[derive(Debug, Clone)]
@@ -405,6 +430,8 @@ enum FlycheckCommandOrigin {
     CheckOverrideCommand,
     /// From a runnable with [project_json::RunnableKind::Flycheck]
     ProjectJsonRunnable,
+    /// `verus` (or `cargo verus`) run via the Verus flycheck variant.
+    Verus,
 }
 
 #[derive(Debug)]
@@ -625,7 +652,9 @@ impl FlycheckActor {
                     let (sender, receiver) = unbounded();
                     match CommandHandle::spawn(
                         command,
-                        CheckParser,
+                        CheckParser {
+                            is_verus: matches!(self.config, FlycheckConfig::VerusCommand { .. }),
+                        },
                         sender,
                         match &self.config {
                             FlycheckConfig::Automatic { cargo_options, .. } => {
@@ -749,6 +778,14 @@ impl FlycheckActor {
                     self.report_progress(Progress::DidFinish(res));
                 }
                 Event::CheckEvent(Some(message)) => match message {
+                    CheckMessage::VerusResult(line) => {
+                        tracing::trace!(
+                            flycheck_id = self.id,
+                            line = line.as_str(),
+                            "verus result line received"
+                        );
+                        self.report_progress(Progress::VerusResult(line));
+                    }
                     CheckMessage::CompilerArtifact(msg) => {
                         tracing::trace!(
                             flycheck_id = self.id,
@@ -990,6 +1027,33 @@ impl FlycheckActor {
 
                 Some((cmd, FlycheckCommandOrigin::CheckOverrideCommand))
             }
+            FlycheckConfig::VerusCommand {
+                verus_args,
+                cargo_verus_enable,
+                cargo_options,
+                report_all_errors,
+            } => {
+                // Verus only operates on a saved file. If we don't have
+                // one, there's nothing for the verifier to look at.
+                let saved = saved_file?;
+                let cmd = if *cargo_verus_enable {
+                    crate::verus_flycheck::run_cargo_verus(
+                        &*self.root,
+                        saved,
+                        verus_args,
+                        cargo_options,
+                        *report_all_errors,
+                    )
+                } else {
+                    crate::verus_flycheck::run_verus_direct(
+                        &*self.root,
+                        saved,
+                        verus_args,
+                        *report_all_errors,
+                    )
+                };
+                Some((cmd, FlycheckCommandOrigin::Verus))
+            }
         }
     }
 
@@ -1006,10 +1070,16 @@ enum CheckMessage {
     /// to the relevant `Cargo.toml`.
     CompilerArtifact(cargo_metadata::Artifact),
     /// A diagnostic message from rustc itself.
-    Diagnostic { diagnostic: Diagnostic, package_id: Option<PackageSpecifier> },
+    Diagnostic {
+        diagnostic: Diagnostic,
+        package_id: Option<PackageSpecifier>,
+    },
+    VerusResult(String),
 }
 
-struct CheckParser;
+struct CheckParser {
+    is_verus: bool,
+}
 
 impl JsonLinesParser<CheckMessage> for CheckParser {
     fn from_line(&self, line: &str, error: &mut String) -> Option<CheckMessage> {
@@ -1036,6 +1106,12 @@ impl JsonLinesParser<CheckMessage> for CheckParser {
                     Some(CheckMessage::Diagnostic { diagnostic: message, package_id: None })
                 }
             };
+        }
+        if self.is_verus && line.contains("verification results::") {
+            // verus
+            // forward verification result if present
+            // TODO: We should ask Verus for json output and then parse it properly here
+            return Some(CheckMessage::VerusResult(line.to_owned()));
         }
 
         error.push_str(line);

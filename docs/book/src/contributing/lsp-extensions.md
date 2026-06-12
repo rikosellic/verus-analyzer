@@ -4,33 +4,33 @@ lsp/ext.rs hash: 98191ad3d886c851
 If you need to change the above hash to make the test pass, please check if you
 need to adjust this doc as well and ping this issue:
 
-  https://github.com/rust-lang/rust-analyzer/issues/4604
+  https://github.com/rust-lang/verus-analyzer/issues/4604
 
 --->
 
 # LSP Extensions
 
-This document describes LSP extensions used by rust-analyzer.
+This document describes LSP extensions used by verus-analyzer.
 It's a best effort document, when in doubt, consult the source (and send a PR with clarification ;-) ).
 We aim to upstream all non Rust-specific extensions to the protocol, but this is not a top priority.
 All capabilities are enabled via the `experimental` field of `ClientCapabilities` or `ServerCapabilities`.
 Requests which we hope to upstream live under `experimental/` namespace.
-Requests, which are likely to always remain specific to `rust-analyzer` are under `rust-analyzer/` namespace.
+Requests, which are likely to always remain specific to `verus-analyzer` are under `verus-analyzer/` namespace.
 
-If you want to be notified about the changes to this document, subscribe to [#4604](https://github.com/rust-lang/rust-analyzer/issues/4604).
+If you want to be notified about the changes to this document, subscribe to [#4604](https://github.com/rust-lang/verus-analyzer/issues/4604).
 
 ## Configuration in `initializationOptions`
 
 **Upstream Issue:** <https://github.com/microsoft/language-server-protocol/issues/567>
 
-The `initializationOptions` field of the `InitializeParams` of the initialization request should contain the `"rust-analyzer"` section of the configuration.
+The `initializationOptions` field of the `InitializeParams` of the initialization request should contain the `"verus-analyzer"` section of the configuration.
 
-`rust-analyzer` normally sends a `"workspace/configuration"` request with `{ "items": ["rust-analyzer"] }` payload.
+`verus-analyzer` normally sends a `"workspace/configuration"` request with `{ "items": ["verus-analyzer"] }` payload.
 However, the server can't do this during initialization.
 At the same time some essential configuration parameters are needed early on, before servicing requests.
 For this reason, we ask that `initializationOptions` contains the configuration, as if the server did make a `"workspace/configuration"` request.
 
-If a language client does not know about `rust-analyzer`'s configuration options it can get sensible defaults by doing any of the following:
+If a language client does not know about `verus-analyzer`'s configuration options it can get sensible defaults by doing any of the following:
 
 * Not sending `initializationOptions`
 * Sending `"initializationOptions": null`
@@ -59,7 +59,7 @@ export interface TextDocumentEdit {
 ```
 
 When applying such code action or text edit, the editor should insert snippet, with tab stops and placeholders.
-At the moment, rust-analyzer guarantees that only a single `TextDocumentEdit` will have edits which can be `InsertTextFormat.Snippet`.
+At the moment, verus-analyzer guarantees that only a single `TextDocumentEdit` will have edits which can be `InsertTextFormat.Snippet`.
 Any additional `TextDocumentEdit`s will only have edits which are `InsertTextFormat.PlainText`.
 
 ### Example
@@ -372,7 +372,7 @@ interface Runnable {
 }
 ```
 
-rust-analyzer supports two `kind`s of runnables, `"cargo"` and `"shell"`. The `args` for `"cargo"` look like this:
+verus-analyzer supports two `kind`s of runnables, `"cargo"` and `"shell"`. The `args` for `"cargo"` look like this:
 
 ```typescript
 {
@@ -581,7 +581,7 @@ interface ExternalDocsResponse {
 
 ## Analyzer Status
 
-**Method:** `rust-analyzer/analyzerStatus`
+**Method:** `verus-analyzer/analyzerStatus`
 
 **Request:**
 
@@ -598,7 +598,7 @@ Returns internal status message, mostly for debugging purposes.
 
 ## Reload Workspace
 
-**Method:** `rust-analyzer/reloadWorkspace`
+**Method:** `verus-analyzer/reloadWorkspace`
 
 **Request:** `null`
 
@@ -608,7 +608,7 @@ Reloads project information (that is, re-executes `cargo metadata`).
 
 ## Rebuild proc-macros
 
-**Method:** `rust-analyzer/rebuildProcMacros`
+**Method:** `verus-analyzer/rebuildProcMacros`
 
 **Request:** `null`
 
@@ -657,7 +657,7 @@ Clients are discouraged from but are allowed to use the `health` status to decid
 
 The flycheck/checkOnSave feature can be controlled via notifications sent by the client to the server.
 
-**Method:** `rust-analyzer/runFlycheck`
+**Method:** `verus-analyzer/runFlycheck`
 
 **Notification:**
 
@@ -671,7 +671,7 @@ interface RunFlycheckParams {
 
 Triggers the flycheck processes.
 
-**Method:** `rust-analyzer/clearFlycheck`
+**Method:** `verus-analyzer/clearFlycheck`
 
 **Notification:**
 
@@ -681,7 +681,7 @@ interface ClearFlycheckParams {}
 
 Clears the flycheck diagnostics.
 
-**Method:** `rust-analyzer/cancelFlycheck`
+**Method:** `verus-analyzer/cancelFlycheck`
 
 **Notification:**
 
@@ -693,7 +693,7 @@ Cancels all running flycheck processes.
 
 ## View Syntax Tree
 
-**Method:** `rust-analyzer/viewSyntaxTree`
+**Method:** `verus-analyzer/viewSyntaxTree`
 
 **Request:**
 
@@ -706,44 +706,44 @@ interface ViewSyntaxTreeParams {
 **Response:** `string`
 
 Returns json representation of the file's syntax tree.
-Used to create a treeView for debugging and working on rust-analyzer itself.
+Used to create a treeView for debugging and working on verus-analyzer itself.
 
 ## View Hir
 
-**Method:** `rust-analyzer/viewHir`
+**Method:** `verus-analyzer/viewHir`
 
 **Request:** `TextDocumentPositionParams`
 
 **Response:** `string`
 
 Returns a textual representation of the HIR of the function containing the cursor.
-For debugging or when working on rust-analyzer itself.
+For debugging or when working on verus-analyzer itself.
 
 ## View Mir
 
-**Method:** `rust-analyzer/viewMir`
+**Method:** `verus-analyzer/viewMir`
 
 **Request:** `TextDocumentPositionParams`
 
 **Response:** `string`
 
 Returns a textual representation of the MIR of the function containing the cursor.
-For debugging or when working on rust-analyzer itself.
+For debugging or when working on verus-analyzer itself.
 
 ## Get Failed Obligations
 
-**Method:** `rust-analyzer/getFailedObligations`
+**Method:** `verus-analyzer/getFailedObligations`
 
 **Request:** `TextDocumentPositionParams`
 
 **Response:** `string`
 
 Returns information about failed trait obligations at the given position.
-For debugging or when working on rust-analyzer itself.
+For debugging or when working on verus-analyzer itself.
 
 ## Interpret Function
 
-**Method:** `rust-analyzer/interpretFunction`
+**Method:** `verus-analyzer/interpretFunction`
 
 **Request:** `TextDocumentPositionParams`
 
@@ -755,7 +755,7 @@ future. Highly experimental.
 
 ## View File Text
 
-**Method:** `rust-analyzer/viewFileText`
+**Method:** `verus-analyzer/viewFileText`
 
 **Request:** `TextDocumentIdentifier`
 
@@ -766,7 +766,7 @@ This is for debugging file sync problems.
 
 ## View ItemTree
 
-**Method:** `rust-analyzer/viewItemTree`
+**Method:** `verus-analyzer/viewItemTree`
 
 **Request:**
 
@@ -782,7 +782,7 @@ Returns a textual representation of the `ItemTree` of the currently open file, f
 
 ## View Crate Graph
 
-**Method:** `rust-analyzer/viewCrateGraph`
+**Method:** `verus-analyzer/viewCrateGraph`
 
 **Request:**
 
@@ -794,13 +794,13 @@ interface ViewCrateGraphParams {
 
 **Response:** `string`
 
-Renders rust-analyzer's crate graph as an SVG image.
+Renders verus-analyzer's crate graph as an SVG image.
 
 If `full` is `true`, the graph includes non-workspace crates (crates.io dependencies as well as sysroot crates).
 
 ## Expand Macro
 
-**Method:** `rust-analyzer/expandMacro`
+**Method:** `verus-analyzer/expandMacro`
 
 **Request:**
 
@@ -863,7 +863,7 @@ Such actions on the client side are appended to a hover bottom as command links:
 
 ## Open Cargo.toml
 
-**Upstream Issue:** <https://github.com/rust-lang/rust-analyzer/issues/6462>
+**Upstream Issue:** <https://github.com/rust-lang/verus-analyzer/issues/6462>
 
 **Experimental Server Capability:** `{ "openCargoToml": boolean }`
 
@@ -891,7 +891,7 @@ This request is sent from client to server to open the current project's Cargo.t
 
 This request is sent from client to server to get the list of tests for the specified position.
 
-**Method:** `rust-analyzer/relatedTests`
+**Method:** `verus-analyzer/relatedTests`
 
 **Request:** `TextDocumentPositionParams`
 
@@ -933,7 +933,7 @@ Triggering a hover inside the selection above will show a result of `i32`.
 
 ## Move Item
 
-**Upstream Issue:** <https://github.com/rust-lang/rust-analyzer/issues/6823>
+**Upstream Issue:** <https://github.com/rust-lang/verus-analyzer/issues/6823>
 
 This request is sent from client to server to move item under cursor or selection in some direction.
 
@@ -1039,7 +1039,7 @@ export interface Diagnostic {
 
 ## Dependency Tree
 
-**Method:** `rust-analyzer/fetchDependencyList`
+**Method:** `verus-analyzer/fetchDependencyList`
 
 **Request:**
 
@@ -1063,7 +1063,7 @@ Returns all crates from this workspace, so it can be used create a viewTree to h
 
 ## View Recursive Memory Layout
 
-**Method:** `rust-analyzer/viewRecursiveMemoryLayout`
+**Method:** `verus-analyzer/viewRecursiveMemoryLayout`
 
 **Request:** `TextDocumentPositionParams`
 
@@ -1098,7 +1098,7 @@ Returns a vector of nodes representing items in the datatype as a tree, `Recursi
 
 If `RecursiveMemoryLayout::nodes::length == 0` we could not find a suitable type.
 
-Generic Types do not give anything because they are incomplete. Fully specified generic types do not give anything if they are selected directly but do work when a child of other types [this is consistent with other behavior](https://github.com/rust-lang/rust-analyzer/issues/15010).
+Generic Types do not give anything because they are incomplete. Fully specified generic types do not give anything if they are selected directly but do work when a child of other types [this is consistent with other behavior](https://github.com/rust-lang/verus-analyzer/issues/15010).
 
 ### Unresolved questions
 

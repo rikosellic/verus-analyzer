@@ -25,13 +25,13 @@ export type ConfigurationValue =
 type ShowStatusBar = "always" | "never" | { documentSelector: vscode.DocumentSelector };
 
 export class Config {
-    readonly extensionId = "rust-lang.rust-analyzer";
+    readonly extensionId = "rikosellic.verus-analyzer-rebased";
 
     configureLang: vscode.Disposable | undefined;
     workspaceState: vscode.Memento;
 
-    private readonly rootSection = "rust-analyzer";
-    private readonly requiresServerReloadOpts = ["server", "files", "showSyntaxTree"].map(
+    private readonly rootSection = "verus-analyzer";
+    private readonly requiresServerReloadOpts = ["server", "files", "showSyntaxTree", "verus"].map(
         (opt) => `${this.rootSection}.${opt}`,
     );
 
@@ -127,7 +127,7 @@ export class Config {
         if (!requiresServerReloadOpt) return;
 
         if (this.restartServerOnConfigChange) {
-            await vscode.commands.executeCommand("rust-analyzer.restartServer");
+            await vscode.commands.executeCommand("verus-analyzer.restartServer");
             return;
         }
 
@@ -135,7 +135,7 @@ export class Config {
         const userResponse = await vscode.window.showInformationMessage(message, "Restart now");
 
         if (userResponse) {
-            const command = "rust-analyzer.restartServer";
+            const command = "verus-analyzer.restartServer";
             await vscode.commands.executeCommand(command);
         }
     }
@@ -268,7 +268,7 @@ export class Config {
      * ```ts
      * const nullableNum = vscode
      *  .workspace
-     *  .getConfiguration("rust-analyzer")
+     *  .getConfiguration("verus-analyzer")
      *  .get<number | null>(path)!;
      *
      * // What happens is that type of `nullableNum` is `number` but not `null | number`:
@@ -282,6 +282,24 @@ export class Config {
 
     get serverPath() {
         return this.get<null | string>("server.path");
+    }
+
+    /// Path to the Verus binary used by the client to query Verus version
+    /// and to expose to the server via the `VERUS_BINARY_PATH` env var.
+    get verusBinary() {
+        return this.get<null | string>("verus.verusBinary");
+    }
+
+    /// When `verusBinary` is unset, download the latest Verus release from
+    /// GitHub into the extension directory and use that binary.
+    get verusAutoFetch() {
+        return this.get<boolean>("verus.autoFetch");
+    }
+
+    /// Verify the Rust toolchain version expected by Verus is installed via
+    /// rustup before starting the server.
+    get verusCheckRustToolchain() {
+        return this.get<boolean>("verus.checkRustToolchain");
     }
 
     get serverExtraEnv(): Env {

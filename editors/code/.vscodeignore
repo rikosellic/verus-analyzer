@@ -11,5 +11,6 @@
 !package.json
 !ra_syntax_tree.tmGrammar.json
 !server
+!verus
 !README.md
 !walkthrough-*

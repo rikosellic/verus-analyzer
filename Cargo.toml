@@ -4,14 +4,14 @@ exclude = ["crates/proc-macro-srv/proc-macro-test/imp"]
 resolver = "2"
 
 [workspace.package]
-rust-version = "1.95"
+rust-version = "1.97.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 authors = ["rust-analyzer team"]
 repository = "https://github.com/rust-lang/rust-analyzer"
 
 [profile.dev]
-debug = 1
+debug = 2
 
 [profile.dev.package]
 # These speed up local tests.
@@ -82,6 +82,7 @@ test-fixture = { path = "./crates/test-fixture", version = "0.0.0" }
 test-utils = { path = "./crates/test-utils", version = "0.0.0" }
 toolchain = { path = "./crates/toolchain", version = "0.0.0" }
 tt = { path = "./crates/tt", version = "0.0.0" }
+va-test = { path = "./crates/va-test", version = "0.0.0" }
 vfs-notify = { path = "./crates/vfs-notify", version = "0.0.0" }
 vfs = { path = "./crates/vfs", version = "0.0.0" }
 edition = { path = "./crates/edition", version = "0.0.0" }
@@ -180,6 +181,7 @@ unsafe_op_in_unsafe_fn = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(bootstrap)',
     "cfg(no_salsa_async_drops)",
+    'cfg(ignore_fragment)',
 ] }
 unused_extern_crates = "warn"
 unused_lifetimes = "warn"

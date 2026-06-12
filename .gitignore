@@ -12,7 +12,11 @@ vendor/
 /out/
 /dump.lsif
 .envrc
+editors/code/CHANGELOG.md
 docs/book/book
 docs/book/src/assists_generated.md
 docs/book/src/diagnostics_generated.md
 docs/book/src/features_generated.md
+
+# Scratch files emitted by ide-assists proof_action runtime
+verus_proof_action_scratch_file.*

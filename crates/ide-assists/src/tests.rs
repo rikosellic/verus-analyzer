@@ -324,6 +324,85 @@ fn check(handler: Handler, before: &str, expected: ExpectedResult<'_>, assist_la
     check_with_config(TEST_CONFIG, handler, before, expected, assist_label);
 }
 
+/// Verus: variant of [`check_assist`] that primes the [`AssistContext`] with a
+/// fixed list of [`VerusError`]s so a proof-action handler can be exercised
+/// without actually running cargo-verus.
+#[track_caller]
+pub(crate) fn check_assist_with_verus_error(
+    assist: Handler,
+    verus_errors: Vec<crate::proof_plumber_api::verus_error::VerusError>,
+    ra_fixture_before: &str,
+    ra_fixture_after: &str,
+) {
+    let ra_fixture_after = trim_indent(ra_fixture_after);
+    check_with_verus_errors(
+        TEST_CONFIG,
+        assist,
+        ra_fixture_before,
+        ExpectedResult::After(&ra_fixture_after),
+        None,
+        verus_errors,
+    );
+}
+
+#[track_caller]
+fn check_with_verus_errors(
+    config: AssistConfig,
+    handler: Handler,
+    before: &str,
+    expected: ExpectedResult<'_>,
+    assist_label: Option<&str>,
+    verus_errors: Vec<crate::proof_plumber_api::verus_error::VerusError>,
+) {
+    let _tracing = setup_tracing();
+    let (mut db, file_with_caret_id, range_or_offset) = RootDatabase::with_range_or_offset(before);
+    db.enable_proc_attr_macros();
+    let sema = Semantics::new(&db);
+    let file_with_caret_id = sema
+        .attach_first_edition_opt(file_with_caret_id.file_id(&db))
+        .unwrap_or(file_with_caret_id);
+    let text_without_caret = db.file_text(file_with_caret_id.file_id(&db)).text(&db).to_string();
+
+    let frange = hir::FileRange { file_id: file_with_caret_id, range: range_or_offset.into() };
+
+    let ctx = AssistContext::new_with_verus_errors(sema, &config, frange, verus_errors);
+    let resolve = match expected {
+        ExpectedResult::Unresolved | ExpectedResult::Label(_) => AssistResolveStrategy::None,
+        _ => AssistResolveStrategy::All,
+    };
+    let mut acc = Assists::new(&ctx, resolve);
+    hir::attach_db(&db, || {
+        HirDatabase::zalsa_register_downcaster(&db);
+        handler(&mut acc, &ctx);
+    });
+    let res = acc.finish();
+
+    let assist = match assist_label {
+        Some(label) => res.into_iter().find(|resolved| resolved.label == label),
+        None => res.into_iter().next(),
+    };
+
+    match (assist, expected) {
+        (Some(assist), ExpectedResult::After(after)) => {
+            let source_change =
+                assist.source_change.expect("Assist did not contain any source changes");
+            let mut actual = text_without_caret;
+            if let Some((&file_id, edit)) = source_change.source_file_edits.iter().next() {
+                if file_id == file_with_caret_id.file_id(&db) {
+                    edit.0.apply(&mut actual);
+                }
+            }
+            assert_eq_text!(after, &actual);
+        }
+        (Some(_), ExpectedResult::NotApplicable) => panic!("assist should not be applicable!"),
+        (None, ExpectedResult::After(_)) => {
+            panic!("code action is not applicable")
+        }
+        (None, ExpectedResult::NotApplicable) => (),
+        _ => panic!("unsupported ExpectedResult variant in verus-error helper"),
+    }
+}
+
 #[track_caller]
 fn check_with_config(
     config: AssistConfig,

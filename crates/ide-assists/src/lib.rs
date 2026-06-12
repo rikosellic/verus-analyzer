@@ -63,7 +63,8 @@
 #![allow(rustdoc::private_intra_doc_links)]
 
 mod assist_config;
-mod assist_context;
+pub mod assist_context;
+pub mod proof_plumber_api;
 #[cfg(test)]
 mod tests;
 pub mod utils;
@@ -92,6 +93,31 @@ pub fn assists(
     let sema = Semantics::new(db);
     let file_id = sema.attach_first_edition(range.file_id);
     let ctx = AssistContext::new(sema, config, hir::FileRange { file_id, range: range.range });
+    let mut acc = Assists::new(&ctx, resolve);
+    handlers::all().iter().for_each(|handler| {
+        handler(&mut acc, &ctx);
+    });
+    acc.finish()
+}
+
+/// Verus: same as `assists` but additionally feeds the latest verus errors
+/// into the [`AssistContext`] so that proof-action handlers can locate the
+/// failing assertion / pre/post-condition they need to operate on.
+pub fn assists_with_verus_error(
+    db: &RootDatabase,
+    config: &AssistConfig,
+    resolve: AssistResolveStrategy,
+    range: ide_db::FileRange,
+    verus_errors: Vec<crate::proof_plumber_api::verus_error::VerusError>,
+) -> Vec<Assist> {
+    let sema = Semantics::new(db);
+    let file_id = sema.attach_first_edition(range.file_id);
+    let ctx = AssistContext::new_with_verus_errors(
+        sema,
+        config,
+        hir::FileRange { file_id, range: range.range },
+        verus_errors,
+    );
     let mut acc = Assists::new(&ctx, resolve);
     handlers::all().iter().for_each(|handler| {
         handler(&mut acc, &ctx);
@@ -178,7 +204,7 @@ mod handlers {
     mod generate_new;
     mod generate_single_field_struct_from;
     mod generate_trait_from_impl;
-    mod inline_call;
+    pub(crate) mod inline_call;
     mod inline_const_as_literal;
     mod inline_local_variable;
     mod inline_macro;
@@ -238,6 +264,8 @@ mod handlers {
     mod unwrap_type_to_generic_arg;
     mod wrap_return_type;
     mod wrap_unwrap_cfg_attr;
+    // Verus proof actions
+    pub(crate) mod proof_action;
 
     pub(crate) fn all() -> &'static [Handler] {
         &[
@@ -411,6 +439,42 @@ mod handlers {
             generate_deref::generate_deref,
             // Are you sure you want to add new assist here, and not to the
             // sorted list above?
+            //
+            // Verus proof actions (gated behind `proof-action` feature)
+            #[cfg(feature = "proof-action")]
+            proof_action::insert_assert_by_block::assert_by,
+            #[cfg(feature = "proof-action")]
+            proof_action::insert_failing_postcondition::intro_failing_ensures,
+            #[cfg(feature = "proof-action")]
+            proof_action::insert_failing_precondition::intro_failing_requires,
+            //#[cfg(feature = "proof-action")]
+            //proof_action::intro_matching_assertions::intro_match,
+            #[cfg(feature = "proof-action")]
+            proof_action::weakest_pre_step::wp_move_assertion,
+            //#[cfg(feature = "proof-action")]
+            //proof_action::apply_induction::apply_induction,
+            //#[cfg(feature = "proof-action")]
+            //proof_action::decompose_failing_assert::localize_error,
+            //#[cfg(feature = "proof-action")]
+            //proof_action::remove_redundant_assertion::remove_dead_assertions,
+            #[cfg(feature = "proof-action")]
+            proof_action::reveal_opaque_in_by_block::assert_by_reveal,
+            #[cfg(feature = "proof-action")]
+            proof_action::reveal_opaque_above::insert_reveal,
+            #[cfg(feature = "proof-action")]
+            proof_action::convert_imply_to_if::imply_to_if,
+            #[cfg(feature = "proof-action")]
+            proof_action::split_imply_ensures::split_imply_ensures,
+            #[cfg(feature = "proof-action")]
+            proof_action::intro_forall::intro_forall,
+            #[cfg(feature = "proof-action")]
+            proof_action::intro_forall_implies::intro_forall_implies,
+            #[cfg(feature = "proof-action")]
+            proof_action::intro_assume_false::by_assume_false,
+            #[cfg(feature = "proof-action")]
+            proof_action::split_smaller_or_equal_to::split_smaller_or_equal_to,
+            #[cfg(feature = "proof-action")]
+            proof_action::seq_index_inbound::seq_index_inbound,
         ]
     }
 }

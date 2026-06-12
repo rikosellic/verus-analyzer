@@ -1214,6 +1214,11 @@ impl GlobalState {
                 diagnostic,
                 package_id,
             } => {
+                // register verus errors
+                // should flush out errors on save
+                if let Some(verr) = crate::verus_interaction::diagnostic_to_verus_err(&diagnostic) {
+                    self.verus_errors.push(verr);
+                }
                 let snap = self.snapshot();
                 let diagnostics = crate::diagnostics::flycheck_to_proto::map_rust_diagnostic_to_lsp(
                     &self.config.diagnostics_map(None),
@@ -1244,7 +1249,10 @@ impl GlobalState {
             FlycheckMessage::ClearDiagnostics {
                 id,
                 kind: ClearDiagnosticsKind::All(ClearScope::Workspace),
-            } => self.diagnostics.clear_check(id),
+            } => {
+                self.verus_errors.clear();
+                self.diagnostics.clear_check(id)
+            }
             FlycheckMessage::ClearDiagnostics {
                 id,
                 kind: ClearDiagnosticsKind::All(ClearScope::Package(package_id)),
@@ -1275,6 +1283,7 @@ impl GlobalState {
 
                 let (state, message) = match progress {
                     flycheck::Progress::DidStart { user_facing_command } => {
+                        self.verus_errors.clear();
                         self.flycheck_formatted_commands[id] = format_with_id(user_facing_command);
                         (Progress::Begin, None)
                     }
@@ -1293,6 +1302,15 @@ impl GlobalState {
                         self.last_flycheck_error =
                             result.err().map(|err| format!("cargo check failed to start: {err}"));
                         *cargo_finished = true;
+                        (Progress::End, None)
+                    }
+                    flycheck::Progress::VerusResult(res) => {
+                        self.send_notification::<lsp_types::ShowMessageNotification>(
+                            lsp_types::ShowMessageParams {
+                                kind: lsp_types::MessageType::Info,
+                                message: res,
+                            },
+                        );
                         (Progress::End, None)
                     }
                 };

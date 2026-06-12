@@ -80,6 +80,8 @@ xflags::xflags! {
             optional --zig
             /// Apply PGO optimizations
             optional --pgo pgo: PgoTrainingCrate
+            /// Build with the Verus `proof-action` feature enabled.
+            optional --proof-action
         }
         /// Read a changelog AsciiDoc file and update the GitHub Releases entry in Markdown.
         cmd publish-release-notes {
@@ -156,6 +158,7 @@ pub struct Dist {
     pub client_patch_version: Option<String>,
     pub zig: bool,
     pub pgo: Option<PgoTrainingCrate>,
+    pub proof_action: bool,
 }
 
 #[derive(Debug)]

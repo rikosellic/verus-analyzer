@@ -269,15 +269,15 @@ pub(crate) fn inline_call(acc: &mut Assists, ctx: &AssistContext<'_, '_>) -> Opt
     })
 }
 
-struct CallInfo {
-    node: ast::CallableExpr,
-    arguments: Vec<ast::Expr>,
-    generic_arg_list: Option<ast::GenericArgList>,
-    krate: Crate,
+pub(crate) struct CallInfo {
+    pub(crate) node: ast::CallableExpr,
+    pub(crate) arguments: Vec<ast::Expr>,
+    pub(crate) generic_arg_list: Option<ast::GenericArgList>,
+    pub(crate) krate: Crate,
 }
 
 impl CallInfo {
-    fn from_name_ref(name_ref: ast::NameRef, krate: Crate) -> Option<CallInfo> {
+    pub(crate) fn from_name_ref(name_ref: ast::NameRef, krate: Crate) -> Option<CallInfo> {
         let parent = name_ref.syntax().parent()?;
         if let Some(call) = ast::MethodCallExpr::cast(parent.clone()) {
             let receiver = call.receiver()?;
@@ -306,7 +306,7 @@ impl CallInfo {
     }
 }
 
-fn get_fn_params<'db>(
+pub(crate) fn get_fn_params<'db>(
     db: &'db dyn HirDatabase,
     function: hir::Function,
     param_list: &ast::ParamList,
@@ -335,7 +335,7 @@ fn get_fn_params<'db>(
     Some(params)
 }
 
-fn inline<'db>(
+pub(crate) fn inline<'db>(
     sema: &Semantics<'db, RootDatabase>,
     function_def_file_id: EditionedFileId,
     function: hir::Function,
@@ -643,6 +643,165 @@ fn inline<'db>(
             make.expr_paren(expr).into()
         }
         Some(expr) if !is_async_fn && no_stmts => expr,
+        _ => match node
+            .syntax()
+            .parent()
+            .and_then(ast::BinExpr::cast)
+            .and_then(|bin_expr| bin_expr.lhs())
+        {
+            Some(lhs) if lhs.syntax() == node.syntax() => {
+                make.expr_paren(ast::Expr::BlockExpr(body)).into()
+            }
+            _ => ast::Expr::BlockExpr(body),
+        },
+    }
+}
+
+/// A simplified variant of [`inline`] used by the Verus ProofPlumber API
+/// (`vst_inline_call`).
+///
+/// Unlike [`inline`], it never queries `Semantics::type_of_expr` on the
+/// caller-side argument expressions. This matters because `vst_inline_call`
+/// constructs a throwaway `Semantics` instance over a synthetic function and
+/// then asks the inliner to splice arguments coming from the *original*
+/// caller's `Semantics`. Calling `type_of_expr` on those foreign nodes would
+/// trigger `Failed to lookup ... in this Semantics`. The trade-off is that
+/// this variant cannot emit `let`-statement based parameter binding nor
+/// adjustment-aware coercions; it always inlines the argument expression
+/// directly at every usage site.
+pub(crate) fn inline_simple<'db>(
+    sema: &Semantics<'db, RootDatabase>,
+    function_def_file_id: EditionedFileId,
+    function: hir::Function,
+    fn_body: &ast::BlockExpr,
+    params: &[(ast::Pat, Option<ast::Type>, hir::Param<'db>)],
+    CallInfo { node, arguments, generic_arg_list, krate }: &CallInfo,
+) -> ast::Expr {
+    let make = SyntaxFactory::without_mappings();
+    let file_id = sema.hir_file_for(fn_body.syntax());
+    let mut body = if let Some(macro_file) = file_id.macro_file() {
+        let span_map = macro_file.expansion_span_map(sema.db);
+        let body_prettified =
+            prettify_macro_expansion(sema.db, fn_body.syntax().clone(), &span_map, *krate);
+        if let Some(body) = ast::BlockExpr::cast(body_prettified) {
+            body
+        } else {
+            fn_body.clone_for_update()
+        }
+    } else {
+        fn_body.clone_for_update()
+    };
+    let original_body_indent = IndentLevel::from_node(body.syntax());
+
+    if let Some(imp) = body.syntax().ancestors().find_map(ast::Impl::cast)
+        && !node.syntax().ancestors().any(|anc| &anc == imp.syntax())
+        && let Some(t) = imp.self_ty()
+    {
+        let (editor, editable_body) = SyntaxEditor::with_ast_node(&body);
+        editable_body
+            .syntax()
+            .descendants_with_tokens()
+            .filter_map(NodeOrToken::into_token)
+            .filter(|tok| tok.kind() == SyntaxKind::SELF_TYPE_KW)
+            .for_each(|tok| editor.replace(tok, t.syntax()));
+        if let Some(new_body) = ast::BlockExpr::cast(editor.finish().new_root().clone()) {
+            body = new_body;
+        }
+    }
+
+    let (editor, editable_body) = SyntaxEditor::with_ast_node(&body);
+    let usages_for_locals = |local| {
+        Definition::Local(local)
+            .usages(sema)
+            .all()
+            .references
+            .remove(&function_def_file_id)
+            .unwrap_or_default()
+            .into_iter()
+    };
+    let param_use_nodes: Vec<Vec<_>> = params
+        .iter()
+        .map(|(pat, _, param)| {
+            if !matches!(pat, ast::Pat::IdentPat(pat) if pat.is_simple_ident()) {
+                return Vec::new();
+            }
+            match param.as_local(sema.db) {
+                Some(l) => usages_for_locals(l)
+                    .map(|FileReference { range, name, .. }| match name {
+                        FileReferenceNode::NameRef(_) => editable_body
+                            .syntax()
+                            .covering_element(range)
+                            .ancestors()
+                            .nth(3)
+                            .and_then(ast::PathExpr::cast),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .unwrap_or_default(),
+                None => Vec::new(),
+            }
+        })
+        .collect();
+
+    if function.self_param(sema.db).is_some()
+        && let Some(self_local) = params[0].2.as_local(sema.db)
+    {
+        let this = || {
+            make.name_ref("this")
+                .syntax()
+                .clone_for_update()
+                .first_token()
+                .expect("NameRef should have had a token.")
+        };
+        usages_for_locals(self_local)
+            .filter_map(|FileReference { name, range, .. }| match name {
+                FileReferenceNode::NameRef(_) => {
+                    Some(editable_body.syntax().covering_element(range))
+                }
+                _ => None,
+            })
+            .for_each(|usage| {
+                editor.replace(usage, this());
+            });
+    }
+
+    // Inline parameter expressions directly. We never query semantics on
+    // `expr` so cross-`Semantics` arguments are safe.
+    for ((_pat, _param_ty, _), usages, expr) in izip!(params, param_use_nodes, arguments).rev() {
+        let usages: &[ast::PathExpr] = &usages;
+        let expr: &ast::Expr = expr;
+
+        let inline_direct = |usage: &ast::PathExpr, replacement: &ast::Expr| {
+            editor.replace(usage.syntax(), replacement.syntax().clone_for_update());
+        };
+
+        for usage in usages {
+            inline_direct(usage, expr);
+        }
+    }
+    if let Some(new_body) = ast::BlockExpr::cast(editor.finish().new_root().clone()) {
+        body = new_body;
+    }
+
+    if let Some(generic_arg_list) = generic_arg_list.clone()
+        && let Some((target, source)) = &sema.scope(node.syntax()).zip(sema.scope(fn_body.syntax()))
+    {
+        if let Some(new_body) = ast::BlockExpr::cast(
+            PathTransform::function_call(target, source, function, generic_arg_list)
+                .apply(body.syntax()),
+        ) {
+            body = new_body;
+        }
+    }
+
+    let original_indentation = match node {
+        ast::CallableExpr::Call(it) => it.indent_level(),
+        ast::CallableExpr::MethodCall(it) => it.indent_level(),
+    };
+    body = body.dedent(original_body_indent).indent(original_indentation);
+
+    match body.tail_expr() {
+        Some(expr) if body.statements().next().is_none() => expr,
         _ => match node
             .syntax()
             .parent()

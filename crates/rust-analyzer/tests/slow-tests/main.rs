@@ -519,6 +519,36 @@ fn otherpkg() {}
     );
 }
 
+// What happens when we don't have a workspace/Cargo.toml file?
+#[test]
+fn test_no_workspace() {
+    if skip_slow_tests() {
+        return;
+    }
+
+    let server = Project::with_fixture(
+        r#"
+//- /foo/src/test.rs
+use vstd::prelude::*;
+verus! {
+    spec fn id(x:int) -> int { x }
+}
+fn main() {}
+"#,
+    )
+    .root("foo")
+    .server()
+    .wait_until_workspace_is_loaded();
+
+    let res = server.send_request::<ShowDocument>(ShowDocumentParams {
+        uri: server.doc_id("foo/src/test.rs").uri,
+        external: None,
+        take_focus: None,
+        selection: None,
+    });
+    dbg!(&res);
+}
+
 #[test]
 fn test_format_document() {
     if skip_slow_tests() {

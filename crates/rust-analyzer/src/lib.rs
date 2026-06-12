@@ -44,6 +44,8 @@ mod target_spec;
 mod task_pool;
 mod test_runner;
 mod version;
+mod verus_flycheck;
+mod verus_interaction;
 
 mod handlers {
     pub(crate) mod dispatch;

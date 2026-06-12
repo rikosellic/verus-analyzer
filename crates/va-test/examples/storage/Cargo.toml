@@ -1,0 +1,9 @@
+[package]
+name = "verified-storage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+storage-macros = { path = "../storage-macros" }
+
+[workspace]
