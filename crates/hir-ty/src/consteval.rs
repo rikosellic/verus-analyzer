@@ -210,6 +210,7 @@ pub(crate) fn literal_ty<'db>(
             },
             None => default_float(types),
         },
+        Literal::VerusInt(_) | Literal::VerusNat(_) | Literal::VerusReal(_) => types.types.error,
     }
 }
 

@@ -4,8 +4,9 @@
 //! are splitting the hir.
 
 use hir_def::{
-    AdtId, AssocItemId, BuiltinDeriveImplId, DefWithBodyId, EnumVariantId, ExpressionStoreOwnerId,
-    FieldId, FunctionId, GenericDefId, GenericParamId, ImplId, ModuleDefId, VariantId,
+    AdtId, AssocItemId, BroadcastGroupId, BuiltinDeriveImplId, DefWithBodyId, EnumVariantId,
+    ExpressionStoreOwnerId, FieldId, FunctionId, GenericDefId, GenericParamId, ImplId, ModuleDefId,
+    VariantId,
     hir::{BindingId, LabelId},
     item_scope::ItemInNs as ItemInNsId,
 };
@@ -13,8 +14,9 @@ use hir_ty::next_solver::AnyImplId;
 use stdx::impl_from;
 
 use crate::{
-    Adt, AnyFunctionId, AssocItem, BuiltinType, DefWithBody, EnumVariant, ExpressionStoreOwner,
-    Field, Function, GenericDef, GenericParam, Impl, ItemInNs, Label, Local, ModuleDef, Variant,
+    Adt, AnyFunctionId, AssocItem, BroadcastGroup, BuiltinType, DefWithBody, EnumVariant,
+    ExpressionStoreOwner, Field, Function, GenericDef, GenericParam, Impl, ItemInNs, Label, Local,
+    ModuleDef, Variant,
 };
 
 macro_rules! from_id {
@@ -49,6 +51,7 @@ from_id![
     (hir_def::ConstParamId, crate::ConstParam),
     (hir_def::LifetimeParamId, crate::LifetimeParam),
     (hir_def::MacroId, crate::Macro),
+    (BroadcastGroupId, crate::BroadcastGroup),
     (hir_def::ExternCrateId, crate::ExternCrateDecl),
     (hir_def::ExternBlockId, crate::ExternBlock),
 ];
@@ -88,21 +91,23 @@ impl From<EnumVariant> for EnumVariantId {
     }
 }
 
-impl_from!(
-    ModuleDefId {
-        ModuleId => Module,
-        FunctionId => Function,
-        AdtId => Adt,
-        EnumVariantId => EnumVariant,
-        ConstId => Const,
-        StaticId => Static,
-        TraitId => Trait,
-        TypeAliasId => TypeAlias,
-        BuiltinType => BuiltinType,
-        MacroId => Macro,
+impl From<ModuleDefId> for ModuleDef {
+    fn from(id: ModuleDefId) -> Self {
+        match id {
+            ModuleDefId::ModuleId(it) => ModuleDef::Module(it.into()),
+            ModuleDefId::FunctionId(it) => ModuleDef::Function(it.into()),
+            ModuleDefId::AdtId(it) => ModuleDef::Adt(it.into()),
+            ModuleDefId::EnumVariantId(it) => ModuleDef::EnumVariant(it.into()),
+            ModuleDefId::ConstId(it) => ModuleDef::Const(it.into()),
+            ModuleDefId::StaticId(it) => ModuleDef::Static(it.into()),
+            ModuleDefId::TraitId(it) => ModuleDef::Trait(it.into()),
+            ModuleDefId::TypeAliasId(it) => ModuleDef::TypeAlias(it.into()),
+            ModuleDefId::BuiltinType(it) => ModuleDef::BuiltinType(it.into()),
+            ModuleDefId::MacroId(it) => ModuleDef::Macro(it.into()),
+            ModuleDefId::BroadcastGroupId(it) => ModuleDef::BroadcastGroup(it.into()),
+        }
     }
-    for ModuleDef
-);
+}
 
 impl TryFrom<ModuleDef> for ModuleDefId {
     type Error = ();
@@ -121,6 +126,7 @@ impl TryFrom<ModuleDef> for ModuleDefId {
             ModuleDef::TypeAlias(it) => ModuleDefId::TypeAliasId(it.into()),
             ModuleDef::BuiltinType(it) => ModuleDefId::BuiltinType(it.into()),
             ModuleDef::Macro(it) => ModuleDefId::MacroId(it.into()),
+            ModuleDef::BroadcastGroup(it) => ModuleDefId::BroadcastGroupId(it.id),
         })
     }
 }
@@ -149,10 +155,20 @@ impl_from!(
     }
     for DefWithBody
 );
-impl_from!(
-    AssocItemId { FunctionId => Function, TypeAliasId => TypeAlias, ConstId => Const }
-    for AssocItem
-);
+
+impl From<AssocItemId> for AssocItem {
+    fn from(def: AssocItemId) -> Self {
+        match def {
+            AssocItemId::FunctionId(it) => AssocItem::Function(it.into()),
+            AssocItemId::TypeAliasId(it) => AssocItem::TypeAlias(it.into()),
+            AssocItemId::ConstId(it) => AssocItem::Const(it.into()),
+            // verus
+            AssocItemId::BroadcastGroupId(it) => {
+                AssocItem::BroadcastGroup(BroadcastGroup { id: it })
+            }
+        }
+    }
+}
 
 impl TryFrom<GenericDef> for GenericDefId {
     type Error = ();
@@ -212,6 +228,8 @@ impl TryFrom<AssocItem> for GenericDefId {
             },
             AssocItem::Const(c) => c.id.into(),
             AssocItem::TypeAlias(t) => t.id.into(),
+            // verus: broadcast groups have no generic parameters of their own.
+            AssocItem::BroadcastGroup(_) => return Err(()),
         })
     }
 }

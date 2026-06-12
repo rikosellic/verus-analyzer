@@ -296,6 +296,8 @@ impl flags::AnalysisStats {
                                 signatures.push(c.into());
                             }
                             AssocItem::TypeAlias(t) => signatures.push(t.into()),
+                            // verus: broadcast group has no body or signature to track
+                            AssocItem::BroadcastGroup(_) => {}
                         }
                     }
                 }

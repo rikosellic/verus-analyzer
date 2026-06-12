@@ -13,10 +13,11 @@ use syntax::{
 };
 
 use crate::item_tree::{
-    BigModItem, Const, Enum, ExternBlock, ExternCrate, FieldsShape, Function, Impl, ImportAlias,
-    Interned, ItemTree, ItemTreeAstId, Macro2, MacroCall, MacroRules, Mod, ModItemId, ModKind,
-    ModPath, RawVisibility, RawVisibilityId, SmallModItem, Static, Struct, StructKind, Trait,
-    TypeAlias, Union, Use, UseTree, UseTreeKind, VisibilityExplicitness, attrs::AttrsOrCfg,
+    AssumeSpecification, BigModItem, BroadcastGroup, BroadcastUse, Const, Enum, ExternBlock,
+    ExternCrate, FieldsShape, Function, Impl, ImportAlias, Interned, ItemTree, ItemTreeAstId,
+    Macro2, MacroCall, MacroRules, Mod, ModItemId, ModKind, ModPath, RawVisibility,
+    RawVisibilityId, SmallModItem, Static, Struct, StructKind, Trait, TypeAlias, Union, Use,
+    UseTree, UseTreeKind, VerusGlobal, VisibilityExplicitness, attrs::AttrsOrCfg,
 };
 
 pub(super) struct Ctx<'db> {
@@ -143,6 +144,11 @@ impl<'db> Ctx<'db> {
             ast::Item::ExternBlock(ast) => self.lower_extern_block(ast).into(),
             // FIXME: Handle `global_asm!()`.
             ast::Item::AsmExpr(_) => return None,
+            // verus
+            ast::Item::VerusGlobal(ast) => self.lower_verus_global(ast).into(),
+            ast::Item::BroadcastGroup(ast) => self.lower_broadcast_group(ast).into(),
+            ast::Item::BroadcastUse(ast) => self.lower_broadcast_use(ast).into(),
+            ast::Item::AssumeSpecification(ast) => self.lower_assume_specification(ast).into(),
         };
         let attrs = self.lower_attrs(item);
         self.add_attrs(mod_item.ast_id(), attrs);
@@ -330,6 +336,45 @@ impl<'db> Ctx<'db> {
         let res = Macro2 { name: name.as_name(), visibility };
         self.tree.small_data.insert(ast_id.upcast(), SmallModItem::Macro2(res));
         Some(ast_id)
+    }
+
+    // verus
+    fn lower_verus_global(&mut self, global: &ast::VerusGlobal) -> ItemTreeAstId<VerusGlobal> {
+        let ast_id = self.source_ast_id_map.ast_id(global);
+        self.tree.small_data.insert(ast_id.upcast(), SmallModItem::VerusGlobal(VerusGlobal));
+        ast_id
+    }
+
+    fn lower_broadcast_group(&mut self, bg: &ast::BroadcastGroup) -> ItemTreeAstId<BroadcastGroup> {
+        let ast_id = self.source_ast_id_map.ast_id(bg);
+        // Extract the optional group name from `broadcast group <ident> { ... }`
+        let name = bg
+            .broadcast_group_identifier()
+            .and_then(|id| id.ident_token())
+            .map(|tok| hir_expand::name::Name::new_root(tok.text()));
+        let visibility = self.lower_visibility(bg);
+        self.tree.small_data.insert(
+            ast_id.upcast(),
+            SmallModItem::BroadcastGroup(BroadcastGroup { name, visibility }),
+        );
+        ast_id
+    }
+
+    fn lower_broadcast_use(&mut self, bu: &ast::BroadcastUse) -> ItemTreeAstId<BroadcastUse> {
+        let ast_id = self.source_ast_id_map.ast_id(bu);
+        self.tree.small_data.insert(ast_id.upcast(), SmallModItem::BroadcastUse(BroadcastUse));
+        ast_id
+    }
+
+    fn lower_assume_specification(
+        &mut self,
+        spec: &ast::AssumeSpecification,
+    ) -> ItemTreeAstId<AssumeSpecification> {
+        let ast_id = self.source_ast_id_map.ast_id(spec);
+        self.tree
+            .small_data
+            .insert(ast_id.upcast(), SmallModItem::AssumeSpecification(AssumeSpecification));
+        ast_id
     }
 
     fn lower_extern_block(&mut self, block: &ast::ExternBlock) -> ItemTreeAstId<ExternBlock> {

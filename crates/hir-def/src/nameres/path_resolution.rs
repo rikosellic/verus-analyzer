@@ -584,6 +584,10 @@ impl DefMap {
                                 crate::AssocItemId::TypeAliasId(type_alias_id) => {
                                     PerNs::types(type_alias_id.into(), curr.vis, curr.import)
                                 }
+                                // verus: broadcast groups resolve as types
+                                crate::AssocItemId::BroadcastGroupId(bg_id) => {
+                                    PerNs::types(bg_id.into(), curr.vis, curr.import)
+                                }
                             },
                             ReachedFixedPoint::Yes,
                             segments.next().map(TupleExt::head),

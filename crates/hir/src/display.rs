@@ -171,6 +171,18 @@ fn write_function<'db>(f: &mut HirFormatter<'_, 'db>, func_id: FunctionId) -> Re
     if data.is_default() {
         f.write_str("default ")?;
     }
+    if data.is_open_spec() {
+        f.write_str("open ")?;
+    } else if data.is_closed_spec() {
+        f.write_str("closed ")?;
+    }
+    if data.is_spec() {
+        f.write_str("spec ")?;
+    } else if data.is_proof() {
+        f.write_str("proof ")?;
+    } else if data.is_axiom() {
+        f.write_str("axiom ")?;
+    }
     if data.is_const() {
         f.write_str("const ")?;
     }
@@ -919,6 +931,7 @@ impl<'db> HirDisplay<'db> for Trait {
                         AssocItem::Function(func) => func.hir_fmt(f),
                         AssocItem::Const(cst) => cst.hir_fmt(f),
                         AssocItem::TypeAlias(type_alias) => type_alias.hir_fmt(f),
+                        AssocItem::BroadcastGroup(_) => Ok(()),
                     }?;
                     f.write_str(";\n")?;
                 }

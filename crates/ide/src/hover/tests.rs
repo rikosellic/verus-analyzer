@@ -11891,3 +11891,152 @@ fn foo() { foo$0(); }
         &HoverConfig { documentation: false, ..HOVER_BASE_CONFIG },
     );
 }
+
+#[test]
+fn verus_hover_shows_fn_mode() {
+    check(
+        r#"
+pub open spec fn inv() -> bool { true }
+
+fn test() {
+    in$0v();
+}
+"#,
+        expect![[r#"
+            *inv*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            pub open spec fn inv() -> bool
+            ```
+        "#]],
+    );
+
+    check(
+        r#"
+closed spec fn hidden() -> bool { true }
+
+fn test() {
+    hid$0den();
+}
+"#,
+        expect![[r#"
+            *hidden*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            closed spec fn hidden() -> bool
+            ```
+        "#]],
+    );
+
+    check(
+        r#"
+spec(checked) fn checked() -> bool { true }
+
+fn test() {
+    che$0cked();
+}
+"#,
+        expect![[r#"
+            *checked*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            spec fn checked() -> bool
+            ```
+        "#]],
+    );
+
+    check(
+        r#"
+proof fn lemma() {}
+
+fn test() {
+    lem$0ma();
+}
+"#,
+        expect![[r#"
+            *lemma*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            proof fn lemma()
+            ```
+        "#]],
+    );
+
+    check(
+        r#"
+axiom fn trusted() -> bool;
+
+fn test() {
+    tru$0sted();
+}
+"#,
+        expect![[r#"
+            *trusted*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            axiom fn trusted() -> bool
+            ```
+        "#]],
+    );
+
+    check(
+        r#"
+exec fn run() {}
+
+fn test() {
+    ru$0n();
+}
+"#,
+        expect![[r#"
+            *run*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            fn run()
+            ```
+        "#]],
+    );
+}
+
+#[test]
+fn verus_hover_broadcast_group_no_crash() {
+    let (analysis, position) = fixture::position(
+        r#"
+pub broadcast group group_page_meta {
+}
+
+fn f() {
+    broadcast use group_page$0_meta;
+}
+"#,
+    );
+    let _ = analysis
+        .hover(
+            &HoverConfig { links_in_hover: true, ..HOVER_BASE_CONFIG },
+            FileRange { file_id: position.file_id, range: TextRange::empty(position.offset) },
+        )
+        .unwrap();
+}

@@ -163,6 +163,10 @@ fn target_data_for_def(
             target_name = Some(t.name(db));
             offset_target_and_file_id(db, t)?
         }
+        hir::ModuleDef::BroadcastGroup(bg) => {
+            target_name = bg.name(db);
+            offset_target_and_file_id(db, bg)?
+        }
         hir::ModuleDef::Module(m) => {
             target_name = m.name(db);
             let in_file_source = m.declaration_source(db)?;

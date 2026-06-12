@@ -542,6 +542,7 @@ fn like_const_value(ctx: &AssistContext<'_, '_>, path_resolution: hir::PathResol
             hir::ModuleDef::Trait(_)
             | hir::ModuleDef::BuiltinType(_)
             | hir::ModuleDef::Macro(_)
+            | hir::ModuleDef::BroadcastGroup(_)
             | hir::ModuleDef::Module(_) => false,
             hir::ModuleDef::Function(_) => false, // no extract named function
         },

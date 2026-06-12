@@ -98,6 +98,10 @@ impl fmt::Debug for ErasedFileAstId {
             Impl,
             BlockExpr,
             AsmExpr,
+            VerusGlobal,
+            BroadcastGroup,
+            BroadcastUse,
+            AssumeSpecification,
             Fixup,
             NoDownmap,
         );
@@ -154,6 +158,11 @@ enum ErasedFileAstIdKind {
     // because incrementality is not a problem, they will always be the only item in the macro file,
     // and memory usage also not because they're rare.
     AsmExpr,
+    // verus
+    VerusGlobal,
+    BroadcastGroup,
+    BroadcastUse,
+    AssumeSpecification,
     /// Represents a fake [`ErasedFileAstId`] that should not be mapped down to macro expansion
     /// result.
     NoDownmap,
@@ -223,6 +232,11 @@ impl ErasedFileAstId {
             .or_else(|| use_ast_id(node, index_map))
             .or_else(|| impl_ast_id(node, index_map))
             .or_else(|| asm_expr_ast_id(node, index_map))
+            // verus
+            .or_else(|| verus_global_ast_id(node, index_map))
+            .or_else(|| broadcast_group_ast_id(node, index_map))
+            .or_else(|| broadcast_use_ast_id(node, index_map))
+            .or_else(|| assume_specification_ast_id(node, index_map))
     }
 
     fn should_alloc(node: &SyntaxNode) -> Option<ErasedFileAstIdKind> {
@@ -235,6 +249,20 @@ impl ErasedFileAstId {
             .or_else(|| ast::Use::can_cast(kind).then_some(ErasedFileAstIdKind::Use))
             .or_else(|| ast::Impl::can_cast(kind).then_some(ErasedFileAstIdKind::Impl))
             .or_else(|| ast::AsmExpr::can_cast(kind).then_some(ErasedFileAstIdKind::AsmExpr))
+            // verus
+            .or_else(|| {
+                ast::VerusGlobal::can_cast(kind).then_some(ErasedFileAstIdKind::VerusGlobal)
+            })
+            .or_else(|| {
+                ast::BroadcastGroup::can_cast(kind).then_some(ErasedFileAstIdKind::BroadcastGroup)
+            })
+            .or_else(|| {
+                ast::BroadcastUse::can_cast(kind).then_some(ErasedFileAstIdKind::BroadcastUse)
+            })
+            .or_else(|| {
+                ast::AssumeSpecification::can_cast(kind)
+                    .then_some(ErasedFileAstIdKind::AssumeSpecification)
+            })
     }
 
     #[inline]
@@ -362,6 +390,59 @@ fn asm_expr_ast_id(
 ) -> Option<ErasedFileAstId> {
     if ast::AsmExpr::can_cast(node.kind()) {
         Some(index_map.new_id(ErasedFileAstIdKind::AsmExpr, ()))
+    } else {
+        None
+    }
+}
+
+// verus
+impl AstIdNode for ast::VerusGlobal {}
+
+fn verus_global_ast_id(
+    node: &SyntaxNode,
+    index_map: &mut ErasedAstIdNextIndexMap,
+) -> Option<ErasedFileAstId> {
+    if ast::VerusGlobal::can_cast(node.kind()) {
+        Some(index_map.new_id(ErasedFileAstIdKind::VerusGlobal, ()))
+    } else {
+        None
+    }
+}
+
+impl AstIdNode for ast::BroadcastGroup {}
+
+fn broadcast_group_ast_id(
+    node: &SyntaxNode,
+    index_map: &mut ErasedAstIdNextIndexMap,
+) -> Option<ErasedFileAstId> {
+    if ast::BroadcastGroup::can_cast(node.kind()) {
+        Some(index_map.new_id(ErasedFileAstIdKind::BroadcastGroup, ()))
+    } else {
+        None
+    }
+}
+
+impl AstIdNode for ast::BroadcastUse {}
+
+fn broadcast_use_ast_id(
+    node: &SyntaxNode,
+    index_map: &mut ErasedAstIdNextIndexMap,
+) -> Option<ErasedFileAstId> {
+    if ast::BroadcastUse::can_cast(node.kind()) {
+        Some(index_map.new_id(ErasedFileAstIdKind::BroadcastUse, ()))
+    } else {
+        None
+    }
+}
+
+impl AstIdNode for ast::AssumeSpecification {}
+
+fn assume_specification_ast_id(
+    node: &SyntaxNode,
+    index_map: &mut ErasedAstIdNextIndexMap,
+) -> Option<ErasedFileAstId> {
+    if ast::AssumeSpecification::can_cast(node.kind()) {
+        Some(index_map.new_id(ErasedFileAstIdKind::AssumeSpecification, ()))
     } else {
         None
     }

@@ -316,6 +316,7 @@ impl<'db> InferenceContext<'db> {
                         }
                     }
                     AssocItemId::TypeAliasId(_) => None,
+                    AssocItemId::BroadcastGroupId(_) => None,
                 }
             })?;
         let def = match item {

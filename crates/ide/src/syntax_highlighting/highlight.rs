@@ -654,6 +654,10 @@ pub(super) fn highlight_def(
             (Highlight::new(HlTag::Symbol(SymbolKind::InlineAsmRegOrRegClass)), None)
         }
         Definition::InlineAsmOperand(_) => (Highlight::new(HlTag::Symbol(SymbolKind::Local)), None),
+        // verus
+        Definition::BroadcastGroup(_) => {
+            (Highlight::new(HlTag::Symbol(SymbolKind::BroadcastGroup)), None)
+        }
     };
 
     let def_crate = def.krate(db);

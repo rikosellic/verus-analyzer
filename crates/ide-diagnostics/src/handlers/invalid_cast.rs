@@ -253,6 +253,28 @@ fn main() {
     }
 
     #[test]
+    fn cast_to_verus_numeric_types() {
+        check_diagnostics(
+            r#"
+//- minicore: sized
+fn main() {
+    #[allow(non_camel_case_types)]
+    struct int;
+    #[allow(non_camel_case_types)]
+    struct nat;
+    #[allow(non_camel_case_types)]
+    struct real;
+
+    let x: usize = 5;
+    let _ = x as int;
+    let _ = x as nat;
+    let _ = x as real;
+}
+"#,
+        );
+    }
+
+    #[test]
     fn cast_to_slice() {
         check_diagnostics_with_disabled(
             r#"

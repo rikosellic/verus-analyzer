@@ -5,25 +5,25 @@ use std::{fmt, ops::ControlFlow};
 use either::Either;
 use intern::{Interned, InternedRef, InternedSliceRef, impl_internable};
 use macros::GenericTypeVisitable;
-use rustc_abi::ReprOptions;
 use rustc_ast_ir::{FloatTy, IntTy, UintTy};
 pub use tls_cache::clear_tls_solver_cache;
 pub use tls_db::{attach_db, attach_db_allow_change, with_attached_db};
 
 use base_db::Crate;
 use hir_def::{
-    AdtId, CallableDefId, EnumId, HasModule, ItemContainerId, StructId, TraitId, TypeAliasId,
-    UnionId, VariantId,
+    AdtId, CallableDefId, EnumVariantId, HasModule, ItemContainerId, StructId, TraitId,
+    TypeAliasId, UnionId, VariantId,
     attrs::AttrFlags,
     expr_store::{ExpressionStore, StoreVisitor},
     hir::{ClosureKind as HirClosureKind, CoroutineKind as HirCoroutineKind, ExprId, PatId},
     lang_item::LangItems,
     signatures::{
-        EnumFlags, EnumSignature, FnFlags, FunctionSignature, ImplFlags, ImplSignature,
+        EnumFlags, EnumSignature, FieldData, FnFlags, FunctionSignature, ImplFlags, ImplSignature,
         StructFlags, StructSignature, TraitFlags, TraitSignature, UnionSignature,
     },
 };
-use rustc_abi::ExternAbi;
+use la_arena::Idx;
+use rustc_abi::{ExternAbi, ReprOptions};
 use rustc_hash::FxHashSet;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_type_ir::{
@@ -425,6 +425,56 @@ pub struct AllocId;
 
 interned_slice!(VariancesOfStorage, VariancesOf, StoredVariancesOf, variances, Variance, Variance);
 
+// FIXME: could/should store actual data?
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum VariantDef {
+    Struct(StructId),
+    Union(UnionId),
+    Enum(EnumVariantId),
+}
+
+impl VariantDef {
+    pub fn id(&self) -> VariantId {
+        match self {
+            VariantDef::Struct(struct_id) => VariantId::StructId(*struct_id),
+            VariantDef::Union(union_id) => VariantId::UnionId(*union_id),
+            VariantDef::Enum(enum_variant_id) => VariantId::EnumVariantId(*enum_variant_id),
+        }
+    }
+
+    pub fn fields(&self, db: &dyn HirDatabase) -> Vec<(Idx<FieldData>, FieldData)> {
+        let id: VariantId = match self {
+            VariantDef::Struct(it) => (*it).into(),
+            VariantDef::Union(it) => (*it).into(),
+            VariantDef::Enum(it) => (*it).into(),
+        };
+        id.fields(db).fields().iter().map(|(id, data)| (id, data.clone())).collect()
+    }
+}
+
+/*
+/// Definition of a variant -- a struct's fields or an enum variant.
+#[derive(Debug, HashStable, TyEncodable, TyDecodable)]
+pub struct VariantDef {
+    /// `DefId` that identifies the variant itself.
+    /// If this variant belongs to a struct or union, then this is a copy of its `DefId`.
+    pub def_id: DefId,
+    /// `DefId` that identifies the variant's constructor.
+    /// If this variant is a struct variant, then this is `None`.
+    pub ctor: Option<(CtorKind, DefId)>,
+    /// Variant or struct name, maybe empty for anonymous adt (struct or union).
+    pub name: Symbol,
+    /// Discriminant of this variant.
+    pub discr: VariantDiscr,
+    /// Fields of this variant.
+    pub fields: IndexVec<FieldIdx, FieldDef>,
+    /// The error guarantees from parser, if any.
+    tainted: Option<ErrorGuaranteed>,
+    /// Flags of the variant (e.g. is field list non-exhaustive)?
+    flags: VariantFlags,
+}
+*/
+
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     struct AdtFlags: u8 {
@@ -441,7 +491,7 @@ bitflags::bitflags! {
 enum AdtDefInner {
     Struct { id: StructId, flags: AdtFlags },
     Union { id: UnionId, flags: AdtFlags },
-    Enum { id: EnumId, flags: AdtFlags },
+    Enum { id: hir_def::EnumId, flags: AdtFlags },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -505,6 +555,7 @@ impl AdtDef {
                 AdtDefInner::Enum { id, flags }
             }
         };
+
         AdtDef(inner)
     }
 
@@ -537,21 +588,32 @@ impl AdtDef {
     }
 
     #[inline]
-    pub fn is_enum(self) -> bool {
+    pub fn is_enum(&self) -> bool {
         matches!(self.0, AdtDefInner::Enum { .. })
     }
 
     #[inline]
-    pub fn is_box(self) -> bool {
+    pub fn is_box(&self) -> bool {
         matches!(self.0, AdtDefInner::Struct { flags, .. } if flags.contains(AdtFlags::IS_BOX))
     }
 
     #[inline]
-    pub fn repr(self, db: &dyn HirDatabase) -> ReprOptions {
+    pub fn repr(self) -> ReprOptions {
         if self.flags().contains(AdtFlags::HAS_REPR) {
-            AttrFlags::repr_assume_has(db, self.def_id()).unwrap_or_default()
+            crate::with_attached_db(|db| {
+                AttrFlags::repr_assume_has(db, self.def_id()).unwrap_or_default()
+            })
         } else {
             ReprOptions::default()
+        }
+    }
+
+    /// Asserts this is a struct or union and returns its unique variant.
+    pub fn non_enum_variant(self) -> VariantDef {
+        match self.0 {
+            AdtDefInner::Struct { id, .. } => VariantDef::Struct(id),
+            AdtDefInner::Union { id, .. } => VariantDef::Union(id),
+            AdtDefInner::Enum { .. } => panic!("called non_enum_variant on enum"),
         }
     }
 }
@@ -567,14 +629,6 @@ impl<'db> inherent::AdtDef<DbInterner<'db>> for AdtDef {
 
     fn is_phantom_data(self) -> bool {
         matches!(self.0, AdtDefInner::Struct { flags, .. } if flags.contains(AdtFlags::IS_PHANTOM_DATA))
-    }
-
-    fn is_manually_drop(self) -> bool {
-        matches!(self.0, AdtDefInner::Struct { flags, .. } if flags.contains(AdtFlags::IS_MANUALLY_DROP))
-    }
-
-    fn is_packed(self) -> bool {
-        self.flags().contains(AdtFlags::IS_PACKED)
     }
 
     fn is_fundamental(self) -> bool {
@@ -628,6 +682,14 @@ impl<'db> inherent::AdtDef<DbInterner<'db>> for AdtDef {
 
     fn destructor(self, interner: DbInterner<'db>) -> Option<AdtDestructorKind> {
         crate::drop::destructor(interner.db, self.def_id()).map(|_| AdtDestructorKind::NotConst)
+    }
+
+    fn is_manually_drop(self) -> bool {
+        matches!(self.0, AdtDefInner::Struct { flags, .. } if flags.contains(AdtFlags::IS_MANUALLY_DROP))
+    }
+
+    fn is_packed(self) -> bool {
+        self.flags().contains(AdtFlags::IS_PACKED)
     }
 
     fn field_representing_type_info(
@@ -1871,18 +1933,13 @@ impl<'db> Interner for DbInterner<'db> {
         };
 
         // The last field of the structure has to exist and contain type/const parameters.
-        let variant = match def.def_id() {
-            AdtId::StructId(id) => VariantId::from(id),
-            AdtId::UnionId(id) => id.into(),
-            AdtId::EnumId(_) => panic!("expected a struct or a union"),
-        };
+        let variant = def.non_enum_variant();
         let fields = variant.fields(self.db());
-        let mut prefix_fields = fields.fields().iter();
-        let Some(tail_field) = prefix_fields.next_back() else {
+        let Some((tail_field, prefix_fields)) = fields.split_last() else {
             return UnsizingParams(DenseBitSet::new_empty(num_params));
         };
 
-        let field_types = self.db().field_types(variant);
+        let field_types = self.db().field_types(variant.id());
         let mut unsizing_params = DenseBitSet::new_empty(num_params);
         let ty = field_types[tail_field.0].ty();
         for arg in ty.instantiate_identity().skip_norm_wip().walk() {

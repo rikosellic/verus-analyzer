@@ -299,6 +299,11 @@ enum SmallModItem {
     Trait(Trait),
     TypeAlias(TypeAlias),
     Union(Union),
+    // verus
+    VerusGlobal(VerusGlobal),
+    BroadcastGroup(BroadcastGroup),
+    BroadcastUse(BroadcastUse),
+    AssumeSpecification(AssumeSpecification),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -431,6 +436,11 @@ ModItemId ->
     TypeAlias in small_data -> ast::TypeAlias,
     Union in small_data -> ast::Union,
     Use in big_data -> ast::Use,
+    // verus
+    VerusGlobal in small_data -> ast::VerusGlobal,
+    BroadcastGroup in small_data -> ast::BroadcastGroup,
+    BroadcastUse in small_data -> ast::BroadcastUse,
+    AssumeSpecification in small_data -> ast::AssumeSpecification,
 }
 
 impl Index<RawVisibilityId> for ItemTree {
@@ -652,6 +662,24 @@ pub struct Macro2 {
     pub name: Name,
     pub(crate) visibility: RawVisibilityId,
 }
+
+// verus
+/// `broadcast group foo { ... }` — the group name is a navigable definition
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct BroadcastGroup {
+    /// The optional group name, e.g. `foo` in `broadcast group foo { ... }`.
+    pub name: Option<Name>,
+    pub(crate) visibility: RawVisibilityId,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct VerusGlobal;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct BroadcastUse;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AssumeSpecification;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ImportKind {

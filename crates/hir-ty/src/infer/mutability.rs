@@ -87,10 +87,17 @@ impl<'db> InferenceContext<'db> {
             }
             Expr::Let { pat, expr } => self.infer_mut_expr(*expr, self.pat_bound_mutability(*pat)),
             Expr::Block { id: _, statements, tail, label: _ }
-            | Expr::Unsafe { id: _, statements, tail } => {
+            | Expr::Unsafe { id: _, statements, tail }
+            | Expr::ProofBlock { id: _, statements, tail } => {
                 for st in statements.iter() {
                     match st {
-                        Statement::Let { pat, type_ref: _, initializer, else_branch } => {
+                        Statement::Let {
+                            pat,
+                            type_ref: _,
+                            initializer,
+                            else_branch,
+                            is_verus_spec_mode: _,
+                        } => {
                             if let Some(i) = initializer {
                                 self.infer_mut_expr(*i, self.pat_bound_mutability(*pat));
                             }
@@ -199,6 +206,40 @@ impl<'db> InferenceContext<'db> {
             | Expr::Continue { .. }
             | Expr::Underscore
             | Expr::IncludeBytes => (),
+            // verus
+            Expr::IsExpr { expr, .. }
+            | Expr::ArrowExpr { expr, .. }
+            | Expr::MatchesExpr { expr, .. } => {
+                self.infer_mut_expr(*expr, Mutability::Not);
+            }
+            Expr::HasExpr { expr_collection, expr_elt } => {
+                self.infer_mut_expr(*expr_collection, Mutability::Not);
+                self.infer_mut_expr(*expr_elt, Mutability::Not);
+            }
+            Expr::Assert { condition, body } => {
+                self.infer_mut_expr(*condition, Mutability::Not);
+                if let &Some(body) = body {
+                    self.infer_mut_expr(body, Mutability::Not);
+                }
+            }
+            Expr::Assume { condition } | Expr::View { condition } => {
+                self.infer_mut_expr(*condition, Mutability::Not);
+            }
+            Expr::Final { expr } => {
+                self.infer_mut_expr(*expr, Mutability::Not);
+            }
+            Expr::AssertForall { closure, implies, body } => {
+                self.infer_mut_expr(*closure, Mutability::Not);
+                if let &Some(i) = implies {
+                    self.infer_mut_expr(i, Mutability::Not);
+                }
+                if let &Some(b) = body {
+                    self.infer_mut_expr(b, Mutability::Not);
+                }
+            }
+            Expr::Quantifier { body, .. } => {
+                self.infer_mut_expr(*body, Mutability::Not);
+            }
         }
     }
 

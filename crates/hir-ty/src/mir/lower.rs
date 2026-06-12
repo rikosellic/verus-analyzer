@@ -1016,6 +1016,7 @@ impl<'a, 'db> MirLowerCtx<'a, 'db> {
                 Ok(Some(current))
             }
             Expr::Field { .. }
+            | Expr::ArrowExpr { .. }
             | Expr::Index { .. }
             | Expr::UnaryOp { op: hir_def::hir::UnaryOp::Deref, .. } => {
                 let Some((p, current)) =
@@ -1125,39 +1126,114 @@ impl<'a, 'db> MirLowerCtx<'a, 'db> {
                     self.push_assignment(current, lhs_place, r_value, expr_id.into());
                     return Ok(Some(current));
                 }
+                if let hir_def::hir::BinaryOp::LogicOp(hir_def::hir::LogicOp::RevImply) = op {
+                    let Some((rhs_op, current)) = self.lower_expr_to_some_operand(*rhs, current)?
+                    else {
+                        return Ok(None);
+                    };
+                    let eval_lhs = self.new_basic_block();
+                    let lhs_end = self.lower_expr_to_place(*lhs, place, eval_lhs)?;
+                    let true_block = self.new_basic_block();
+                    self.write_bytes_to_place(
+                        true_block,
+                        place,
+                        Box::new([1]),
+                        Ty::new_bool(self.interner()),
+                        expr_id.into(),
+                    )?;
+                    self.set_terminator(
+                        current,
+                        TerminatorKind::SwitchInt {
+                            discr: rhs_op,
+                            targets: SwitchTargets::static_if(1, eval_lhs, true_block),
+                        },
+                        expr_id.into(),
+                    );
+                    return Ok(self.merge_blocks(lhs_end, Some(true_block), expr_id.into()));
+                }
                 let Some((lhs_op, current)) = self.lower_expr_to_some_operand(*lhs, current)?
                 else {
                     return Ok(None);
                 };
-                if let hir_def::hir::BinaryOp::LogicOp(op) = op {
-                    let value_to_short = match op {
-                        syntax::ast::LogicOp::And => 0,
-                        syntax::ast::LogicOp::Or => 1,
-                    };
-                    let start_of_then = self.new_basic_block();
-                    self.push_assignment(
-                        start_of_then,
-                        place,
-                        lhs_op.clone().into(),
-                        expr_id.into(),
-                    );
-                    let end_of_then = Some(start_of_then);
-                    let start_of_else = self.new_basic_block();
-                    let end_of_else = self.lower_expr_to_place(*rhs, place, start_of_else)?;
-                    self.set_terminator(
-                        current,
-                        TerminatorKind::SwitchInt {
-                            discr: lhs_op,
-                            targets: SwitchTargets::static_if(
-                                value_to_short,
-                                start_of_then,
-                                start_of_else,
-                            ),
-                        },
-                        expr_id.into(),
-                    );
-                    return Ok(self.merge_blocks(end_of_then, end_of_else, expr_id.into()));
-                }
+                let op = match op {
+                    hir_def::hir::BinaryOp::LogicOp(op) => match op {
+                        hir_def::hir::LogicOp::And | hir_def::hir::LogicOp::Or => {
+                            let value_to_short =
+                                if matches!(op, hir_def::hir::LogicOp::And) { 0 } else { 1 };
+                            let short_block = self.new_basic_block();
+                            self.push_assignment(
+                                short_block,
+                                place,
+                                lhs_op.clone().into(),
+                                expr_id.into(),
+                            );
+                            let eval_rhs = self.new_basic_block();
+                            let rhs_end = self.lower_expr_to_place(*rhs, place, eval_rhs)?;
+                            self.set_terminator(
+                                current,
+                                TerminatorKind::SwitchInt {
+                                    discr: lhs_op,
+                                    targets: SwitchTargets::static_if(
+                                        value_to_short,
+                                        short_block,
+                                        eval_rhs,
+                                    ),
+                                },
+                                expr_id.into(),
+                            );
+                            return Ok(self.merge_blocks(
+                                Some(short_block),
+                                rhs_end,
+                                expr_id.into(),
+                            ));
+                        }
+                        hir_def::hir::LogicOp::Imply => {
+                            let eval_rhs = self.new_basic_block();
+                            let rhs_end = self.lower_expr_to_place(*rhs, place, eval_rhs)?;
+                            let true_block = self.new_basic_block();
+                            self.write_bytes_to_place(
+                                true_block,
+                                place,
+                                Box::new([1]),
+                                Ty::new_bool(self.interner()),
+                                expr_id.into(),
+                            )?;
+                            self.set_terminator(
+                                current,
+                                TerminatorKind::SwitchInt {
+                                    discr: lhs_op,
+                                    targets: SwitchTargets::static_if(1, eval_rhs, true_block),
+                                },
+                                expr_id.into(),
+                            );
+                            return Ok(self.merge_blocks(
+                                rhs_end,
+                                Some(true_block),
+                                expr_id.into(),
+                            ));
+                        }
+                        hir_def::hir::LogicOp::RevImply => {
+                            unreachable!()
+                        }
+                        hir_def::hir::LogicOp::Iff => {
+                            let Some((rhs_op, current)) =
+                                self.lower_expr_to_some_operand(*rhs, current)?
+                            else {
+                                return Ok(None);
+                            };
+                            self.push_assignment(
+                                current,
+                                place,
+                                Rvalue::CheckedBinaryOp(BinOp::Eq, lhs_op, rhs_op),
+                                expr_id.into(),
+                            );
+                            return Ok(Some(current));
+                        }
+                    },
+                    hir_def::hir::BinaryOp::ArithOp(op) => BinOp::from(op),
+                    hir_def::hir::BinaryOp::CmpOp(op) => BinOp::from(op),
+                    hir_def::hir::BinaryOp::Assignment { .. } => unreachable!(), // handled above
+                };
                 let Some((rhs_op, current)) = self.lower_expr_to_some_operand(*rhs, current)?
                 else {
                     return Ok(None);
@@ -1165,19 +1241,7 @@ impl<'a, 'db> MirLowerCtx<'a, 'db> {
                 self.push_assignment(
                     current,
                     place,
-                    Rvalue::CheckedBinaryOp(
-                        match op {
-                            hir_def::hir::BinaryOp::LogicOp(op) => match op {
-                                hir_def::hir::LogicOp::And => BinOp::BitAnd, // FIXME: make these short circuit
-                                hir_def::hir::LogicOp::Or => BinOp::BitOr,
-                            },
-                            hir_def::hir::BinaryOp::ArithOp(op) => BinOp::from(op),
-                            hir_def::hir::BinaryOp::CmpOp(op) => BinOp::from(op),
-                            hir_def::hir::BinaryOp::Assignment { .. } => unreachable!(), // handled above
-                        },
-                        lhs_op,
-                        rhs_op,
-                    ),
+                    Rvalue::CheckedBinaryOp(op, lhs_op, rhs_op),
                     expr_id.into(),
                 );
                 Ok(Some(current))
@@ -1390,6 +1454,135 @@ impl<'a, 'db> MirLowerCtx<'a, 'db> {
             }
             Expr::Underscore => Ok(Some(current)),
             Expr::IncludeBytes => not_supported!("include_bytes!()"),
+            // verus
+            Expr::ProofBlock { id: _, statements, tail } => {
+                self.lower_block_to_place(statements, current, *tail, place, expr_id.into())
+            }
+            Expr::Assert { condition, body } => {
+                let Some((_condition, mut current)) =
+                    self.lower_expr_to_some_operand(*condition, current)?
+                else {
+                    return Ok(None);
+                };
+                if let Some(body) = body {
+                    let Some((body_place, next)) =
+                        self.lower_expr_as_place(current, *body, true)?
+                    else {
+                        return Ok(None);
+                    };
+                    self.push_fake_read(next, body_place, (*body).into());
+                    current = next;
+                }
+                self.write_unit_to_place(current, place, expr_id.into())?;
+                Ok(Some(current))
+            }
+            Expr::Assume { condition } => {
+                let Some((_condition, current)) =
+                    self.lower_expr_to_some_operand(*condition, current)?
+                else {
+                    return Ok(None);
+                };
+                self.write_unit_to_place(current, place, expr_id.into())?;
+                Ok(Some(current))
+            }
+            Expr::AssertForall { closure, implies, body } => {
+                let Some((closure_place, mut current)) =
+                    self.lower_expr_as_place(current, *closure, true)?
+                else {
+                    return Ok(None);
+                };
+                self.push_fake_read(current, closure_place, (*closure).into());
+                if let Some(implies) = implies {
+                    let Some((implies_place, next)) =
+                        self.lower_expr_as_place(current, *implies, true)?
+                    else {
+                        return Ok(None);
+                    };
+                    self.push_fake_read(next, implies_place, (*implies).into());
+                    current = next;
+                }
+                if let Some(body) = body {
+                    let Some((body_place, next)) =
+                        self.lower_expr_as_place(current, *body, true)?
+                    else {
+                        return Ok(None);
+                    };
+                    self.push_fake_read(next, body_place, (*body).into());
+                    current = next;
+                }
+                self.write_unit_to_place(current, place, expr_id.into())?;
+                Ok(Some(current))
+            }
+            Expr::Final { expr } => self.lower_expr_to_place(*expr, place, current),
+            Expr::View { .. } => {
+                if let InferBodyId::DefWithBodyId(DefWithBodyId::FunctionId(f)) = self.owner {
+                    let assoc = f.lookup(self.db);
+                    if let ItemContainerId::TraitId(t) = assoc.container {
+                        let name = &FunctionSignature::of(self.db, f).name;
+                        return Err(MirLowerError::TraitFunctionDefinition(t, name.clone()));
+                    }
+                }
+                Err(MirLowerError::IncompleteExpr)
+            }
+            Expr::IsExpr { expr, type_ref: _ } => {
+                let Some((it, current)) = self.lower_expr_to_some_operand(*expr, current)? else {
+                    return Ok(None);
+                };
+                let source_ty = self.infer.expr_ty(*expr);
+                let target_ty = self.infer.expr_ty(expr_id);
+                self.push_assignment(
+                    current,
+                    place,
+                    Rvalue::Cast(cast_kind(self.db, source_ty, target_ty)?, it, target_ty.store()),
+                    expr_id.into(),
+                );
+                Ok(Some(current))
+            }
+            Expr::HasExpr { expr_collection, expr_elt } => {
+                let Some((it, current)) =
+                    self.lower_expr_to_some_operand(*expr_collection, current)?
+                else {
+                    return Ok(None);
+                };
+                let source_ty = self.infer.expr_ty(*expr_collection);
+                let target_ty = self.infer.expr_ty(expr_id);
+                self.push_assignment(
+                    current,
+                    place,
+                    Rvalue::Cast(cast_kind(self.db, source_ty, target_ty)?, it, target_ty.store()),
+                    expr_id.into(),
+                );
+                let Some((it, current)) = self.lower_expr_to_some_operand(*expr_elt, current)?
+                else {
+                    return Ok(None);
+                };
+                let source_ty = self.infer.expr_ty(*expr_elt);
+                let target_ty = self.infer.expr_ty(expr_id);
+                self.push_assignment(
+                    current,
+                    place,
+                    Rvalue::Cast(cast_kind(self.db, source_ty, target_ty)?, it, target_ty.store()),
+                    expr_id.into(),
+                );
+                Ok(Some(current))
+            }
+            Expr::MatchesExpr { expr, pat: _ } => {
+                let Some((it, current)) = self.lower_expr_to_some_operand(*expr, current)? else {
+                    return Ok(None);
+                };
+                let source_ty = self.infer.expr_ty(*expr);
+                let target_ty = self.infer.expr_ty(expr_id);
+                self.push_assignment(
+                    current,
+                    place,
+                    Rvalue::Cast(cast_kind(self.db, source_ty, target_ty)?, it, target_ty.store()),
+                    expr_id.into(),
+                );
+                Ok(Some(current))
+            }
+            Expr::Quantifier { .. } => {
+                not_supported!("verus#quantifier")
+            }
         }
     }
 
@@ -1505,6 +1698,13 @@ impl<'a, 'db> MirLowerCtx<'a, 'db> {
             hir_def::hir::Literal::Bool(b) => Box::new([*b as u8]),
             hir_def::hir::Literal::Int(it, _) => Box::from(&it.to_le_bytes()[0..size()?]),
             hir_def::hir::Literal::Uint(it, _) => Box::from(&it.to_le_bytes()[0..size()?]),
+            hir_def::hir::Literal::VerusInt(_)
+            | hir_def::hir::Literal::VerusNat(_)
+            | hir_def::hir::Literal::VerusReal(_) => {
+                return Err(MirLowerError::NotSupported(
+                    "Verus mathematical numeric literals".to_owned(),
+                ));
+            }
             hir_def::hir::Literal::Float(f, _) => match size()? {
                 16 => Box::new(f.to_f128().to_bits().to_le_bytes()),
                 8 => Box::new(f.to_f64().to_bits().to_le_bytes()),
@@ -1567,6 +1767,20 @@ impl<'a, 'db> MirLowerCtx<'a, 'db> {
         span: MirSpan,
     ) -> Result<'db, ()> {
         self.push_assignment(prev_block, place, Operand::from_bytes(cv, ty).into(), span);
+        Ok(())
+    }
+
+    fn write_unit_to_place(
+        &mut self,
+        prev_block: BasicBlockId,
+        place: PlaceRef<'db>,
+        span: MirSpan,
+    ) -> Result<'db, ()> {
+        let rvalue = Rvalue::Aggregate(
+            AggregateKind::Tuple(Ty::new_tup(self.interner(), &[]).store()),
+            Box::new([]),
+        );
+        self.push_assignment(prev_block, place, rvalue, span);
         Ok(())
     }
 
@@ -1822,7 +2036,13 @@ impl<'a, 'db> MirLowerCtx<'a, 'db> {
         let scope = self.push_drop_scope();
         for statement in statements.iter() {
             match statement {
-                hir_def::hir::Statement::Let { pat, initializer, else_branch, type_ref: _ } => {
+                hir_def::hir::Statement::Let {
+                    pat,
+                    initializer,
+                    else_branch,
+                    type_ref: _,
+                    is_verus_spec_mode: _,
+                } => {
                     if let Some(expr_id) = initializer {
                         let else_block;
                         let Some((init_place, c)) =

@@ -24,6 +24,7 @@ use intern::Symbol;
 use rustc_hash::FxHashMap;
 use syntax::{AstNode, AstPtr, SyntaxNode, SyntaxNodePtr, ToSmolStr, ast::HasName};
 
+use crate::has_source::HasSource as HirHasSource;
 use crate::{Crate, HasCrate, Module, ModuleDef, Semantics};
 
 /// The actual data that is stored in the index. It should be as compact as
@@ -244,6 +245,9 @@ impl<'a> SymbolCollector<'a> {
                         MacroId::MacroRulesId(id) => this.push_decl(id, name, false, None),
                         MacroId::ProcMacroId(id) => this.push_decl(id, name, false, None),
                     };
+                }
+                ModuleDefId::BroadcastGroupId(id) => {
+                    this.push_broadcast_group_decl(id.into(), name, false, None);
                 }
                 // Don't index these.
                 ModuleDefId::BuiltinType(_) => {}
@@ -474,7 +478,44 @@ impl<'a> SymbolCollector<'a> {
             AssocItemId::FunctionId(id) => self.push_decl(id, name, true, trait_do_not_complete),
             AssocItemId::ConstId(id) => self.push_decl(id, name, true, trait_do_not_complete),
             AssocItemId::TypeAliasId(id) => self.push_decl(id, name, true, trait_do_not_complete),
+            AssocItemId::BroadcastGroupId(id) => {
+                self.push_broadcast_group_decl(id.into(), name, true, trait_do_not_complete)
+            }
         };
+    }
+
+    fn push_broadcast_group_decl(
+        &mut self,
+        def: crate::BroadcastGroup,
+        name: &Name,
+        is_assoc: bool,
+        trait_do_not_complete: Option<Complete>,
+    ) -> Complete {
+        let Some(source) = def.source(self.db) else { return Complete::Yes };
+        let loc = DeclarationLocation {
+            hir_file_id: source.file_id,
+            ptr: SyntaxNodePtr::new(source.value.syntax()),
+            name_ptr: None,
+        };
+
+        let mut do_not_complete = Complete::Yes;
+        if let Some(trait_do_not_complete) = trait_do_not_complete {
+            do_not_complete = Complete::for_trait_item(trait_do_not_complete, do_not_complete);
+        }
+
+        self.symbols.insert(FileSymbol {
+            name: name.symbol().clone(),
+            def: ModuleDef::BroadcastGroup(def),
+            container_name: self.current_container_name.clone(),
+            loc,
+            is_alias: false,
+            is_assoc,
+            is_import: false,
+            do_not_complete,
+            _marker: PhantomData,
+        });
+
+        do_not_complete
     }
 
     fn push_decl<L>(
@@ -490,9 +531,9 @@ impl<'a> SymbolCollector<'a> {
         <<L as Lookup>::Data as HasSource>::Value: HasName,
     {
         let loc = id.lookup(self.db);
+        let def: ModuleDef = id.into().into();
         let source = loc.source(self.db);
         let Some(name_node) = source.value.name() else { return Complete::Yes };
-        let def = ModuleDef::from(id.into());
         let loc = DeclarationLocation {
             hir_file_id: source.file_id,
             ptr: SyntaxNodePtr::new(source.value.syntax()),

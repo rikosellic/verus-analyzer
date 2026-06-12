@@ -453,6 +453,8 @@ impl CompletionItemKind {
                 SymbolKind::Union => "un",
                 SymbolKind::ValueParam => "vp",
                 SymbolKind::Variant => "ev",
+                // verus
+                SymbolKind::BroadcastGroup => "bg",
             },
             CompletionItemKind::Binding => "bn",
             CompletionItemKind::BuiltinType => "bt",

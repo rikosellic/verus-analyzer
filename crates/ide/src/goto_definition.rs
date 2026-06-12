@@ -416,6 +416,8 @@ fn try_filter_trait_item_definition(
                 .find_map(|itm| (itm.name(db)? == name).then(|| itm.try_to_nav(sema)).flatten())
                 .map(|it| it.collect())
         }
+        // verus: broadcast groups don't appear in trait declarations
+        AssocItem::BroadcastGroup(_) => None,
     }
 }
 
@@ -4224,6 +4226,63 @@ struct Struct {
     field: () = S.foo$0(),
 }
         "#,
+        );
+    }
+
+    #[test]
+    fn verus_goto_def_broadcast_group() {
+        check(
+            r#"
+pub broadcast group group_page_meta {
+                 // ^^^^^^^^^^^^^^^
+}
+
+fn f() {
+    broadcast use group_page$0_meta;
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn verus_goto_def_requires_clause_parameter() {
+        check(
+            r#"
+fn f(x: int)
+   //^
+    requires x$0 >= 0
+{
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn verus_goto_def_ensures_clause_parameter() {
+        check(
+            r#"
+fn f(x: int) -> int
+   //^
+    ensures x$0 >= 0
+{
+    x
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn verus_goto_def_contract_clause_spec_fn() {
+        check(
+            r#"
+spec fn positive(x: int) -> bool { true }
+//      ^^^^^^^^
+
+fn f(x: int)
+    requires positive$0(x)
+{
+}
+"#,
         );
     }
 }

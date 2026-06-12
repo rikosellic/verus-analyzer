@@ -28,12 +28,12 @@ use syntax::ast;
 use triomphe::Arc;
 
 use crate::{
-    AdtId, AssocItemId, AstId, AstIdWithPath, BuiltinDeriveImplId, BuiltinDeriveImplLoc, ConstLoc,
-    EnumLoc, ExternBlockLoc, ExternCrateId, ExternCrateLoc, FunctionId, FunctionLoc, FxIndexMap,
-    ImplLoc, Intern, ItemContainerId, Lookup, Macro2Id, Macro2Loc, MacroExpander, MacroId,
-    MacroRulesId, MacroRulesLoc, MacroRulesLocFlags, ModuleDefId, ModuleId, ProcMacroId,
-    ProcMacroLoc, StaticLoc, StructLoc, TraitLoc, TypeAliasLoc, UnionLoc, UnresolvedMacro, UseId,
-    UseLoc, file_item_tree,
+    AdtId, AssocItemId, AstId, AstIdWithPath, BroadcastGroupLoc, BuiltinDeriveImplId,
+    BuiltinDeriveImplLoc, ConstLoc, EnumLoc, ExternBlockLoc, ExternCrateId, ExternCrateLoc,
+    FunctionId, FunctionLoc, FxIndexMap, ImplLoc, Intern, ItemContainerId, Lookup, Macro2Id,
+    Macro2Loc, MacroExpander, MacroId, MacroRulesId, MacroRulesLoc, MacroRulesLocFlags,
+    ModuleDefId, ModuleId, ProcMacroId, ProcMacroLoc, StaticLoc, StructLoc, TraitLoc, TypeAliasLoc,
+    UnionLoc, UnresolvedMacro, UseId, UseLoc, file_item_tree,
     item_scope::{GlobId, ImportId, ImportOrExternCrate, PerNsGlobImports},
     item_tree::{
         self, Attrs, AttrsOrCfg, FieldsShape, ImportAlias, ImportKind, ItemTree, ItemTreeAstId,
@@ -1060,6 +1060,10 @@ impl<'db> DefCollector<'db> {
                                             PerNs::values(it.into(), vis, None)
                                         }
                                         AssocItemId::TypeAliasId(it) => {
+                                            PerNs::types(it.into(), vis, None)
+                                        }
+                                        // verus
+                                        AssocItemId::BroadcastGroupId(it) => {
                                             PerNs::types(it.into(), vis, None)
                                         }
                                     };
@@ -2231,6 +2235,24 @@ impl ModCollector<'_, '_> {
                         vis,
                         false,
                     );
+                }
+                ModItemId::BroadcastGroup(id) => {
+                    let it = &self.item_tree[id];
+                    if let Some(name) = &it.name {
+                        let vis =
+                            resolve_vis(def_map, local_def_map, &self.item_tree[it.visibility]);
+                        let bg_id = BroadcastGroupLoc {
+                            container: ItemContainerId::ModuleId(module_id),
+                            id: InFile::new(self.file_id(), id),
+                        }
+                        .intern(db);
+                        update_def(self.def_collector, bg_id.into(), name, vis, false);
+                    }
+                }
+                ModItemId::VerusGlobal(_)
+                | ModItemId::BroadcastUse(_)
+                | ModItemId::AssumeSpecification(_) => {
+                    // Verus items that don't contribute to name resolution
                 }
             }
         };

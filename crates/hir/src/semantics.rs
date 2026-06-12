@@ -96,7 +96,8 @@ impl<'db> PathResolution<'db> {
                 | ModuleDef::Function(_)
                 | ModuleDef::Module(_)
                 | ModuleDef::Static(_)
-                | ModuleDef::Trait(_),
+                | ModuleDef::Trait(_)
+                | ModuleDef::BroadcastGroup(_),
             ) => None,
             PathResolution::Def(ModuleDef::TypeAlias(alias)) => {
                 Some(TypeNs::TypeAliasId((*alias).into()))

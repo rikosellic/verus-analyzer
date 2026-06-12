@@ -313,6 +313,8 @@ where
                 }
             }
         }
+        // verus: broadcast group is not a standard assoc item for dyn compat
+        AssocItemId::BroadcastGroupId(_) => ControlFlow::Continue(()),
     }
 }
 

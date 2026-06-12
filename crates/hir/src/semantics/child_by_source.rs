@@ -170,7 +170,8 @@ impl ChildBySource for ItemScope {
                 },
                 ModuleDefId::ModuleId(_)
                 | ModuleDefId::EnumVariantId(_)
-                | ModuleDefId::BuiltinType(_) => (),
+                | ModuleDefId::BuiltinType(_)
+                | ModuleDefId::BroadcastGroupId(_) => (),
             }
         }
     }
@@ -303,5 +304,9 @@ fn add_assoc_item(
         AssocItemId::FunctionId(func) => insert_item_loc(db, res, file_id, func, keys::FUNCTION),
         AssocItemId::ConstId(konst) => insert_item_loc(db, res, file_id, konst, keys::CONST),
         AssocItemId::TypeAliasId(ty) => insert_item_loc(db, res, file_id, ty, keys::TYPE_ALIAS),
+        // verus
+        AssocItemId::BroadcastGroupId(bg) => {
+            insert_item_loc(db, res, file_id, bg, keys::BROADCAST_GROUP)
+        }
     }
 }

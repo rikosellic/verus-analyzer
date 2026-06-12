@@ -2,10 +2,19 @@
 
 use std::collections::hash_map;
 
-use hir_def::{FunctionId, GenericParamId, TraitId, hir::ExprId};
+use hir_def::{
+    AdtId, FunctionId, GenericParamId, TraitId,
+    expr_store::path::Path,
+    hir::ExprId,
+    signatures::{StructSignature, TypeAliasSignature},
+};
+use hir_expand::name::Name;
 use rustc_ast_ir::Mutability;
-use rustc_type_ir::inherent::{IntoKind, Ty as _};
-use syntax::ast::{ArithOp, BinaryOp, UnaryOp};
+use rustc_type_ir::{
+    InferTy,
+    inherent::{IntoKind, Ty as _},
+};
+use syntax::ast::{ArithOp, BinaryOp, CmpOp, UnaryOp};
 use tracing::debug;
 
 use crate::{
@@ -61,6 +70,19 @@ impl<'db> InferenceContext<'db> {
             expr, expr, op, lhs_expr, rhs_expr
         );
 
+        if self.in_verus_spec_mode()
+            && Self::is_verus_spec_ord_op(op)
+            && let Some(chain_lhs_expr) = self.chained_comparison_lhs(lhs_expr)
+        {
+            return self.infer_chained_comparison_expr(
+                expr,
+                op,
+                lhs_expr,
+                chain_lhs_expr,
+                rhs_expr,
+            );
+        }
+
         match op {
             BinaryOp::LogicOp(_) => {
                 // && and || are a simple case.
@@ -82,6 +104,12 @@ impl<'db> InferenceContext<'db> {
                 self.types.types.bool
             }
             _ => {
+                if self.in_verus_spec_mode()
+                    && matches!(BinOpCategory::from(op), BinOpCategory::Math)
+                {
+                    return self.infer_verus_spec_arithmetic_expr(expr, op, lhs_expr, rhs_expr);
+                }
+
                 // Otherwise, we always treat operators as if they are
                 // overloaded. This is the way to be most flexible w/r/t
                 // types that get inferred.
@@ -101,6 +129,14 @@ impl<'db> InferenceContext<'db> {
                 // though we don't know yet what type 2 has and hence
                 // can't pin this down to a specific impl.
                 let category = BinOpCategory::from(op);
+                if matches!(category, BinOpCategory::Comparison)
+                    && self.in_verus_spec_mode()
+                    && Self::is_verus_spec_comparison_op(op)
+                    && self.is_verus_spec_comparison(lhs_ty, rhs_ty)
+                {
+                    return self.types.types.bool;
+                }
+
                 if !lhs_ty.is_ty_var()
                     && !rhs_ty.is_ty_var()
                     && is_builtin_binop(lhs_ty, rhs_ty, category)
@@ -113,6 +149,44 @@ impl<'db> InferenceContext<'db> {
                     return_ty
                 }
             }
+        }
+    }
+
+    fn infer_verus_spec_arithmetic_expr(
+        &mut self,
+        expr: ExprId,
+        op: BinaryOp,
+        lhs_expr: ExprId,
+        rhs_expr: ExprId,
+    ) -> Ty<'db> {
+        let lhs_ty = self.infer_expr_no_expect(lhs_expr, ExprIsRead::Yes);
+        let lhs_ty = self.table.resolve_vars_with_obligations(lhs_ty);
+        let rhs_ty = self.infer_expr_no_expect(rhs_expr, ExprIsRead::Yes);
+        let rhs_ty = self.table.resolve_vars_with_obligations(rhs_ty);
+
+        self.verus_spec_arithmetic_ty(expr, op, lhs_ty, rhs_ty)
+            .unwrap_or_else(|| self.table.next_ty_var(expr.into()))
+    }
+
+    // Verus accepts chained comparisons in spec contexts. Exec contexts fall through to ordinary
+    // binary operator inference, where `(a < b) <= c` is rejected as a Rust type mismatch.
+    fn infer_chained_comparison_expr(
+        &mut self,
+        expr: ExprId,
+        op: BinaryOp,
+        lhs_expr: ExprId,
+        chain_lhs_expr: ExprId,
+        rhs_expr: ExprId,
+    ) -> Ty<'db> {
+        self.infer_expr_inner(lhs_expr, &Expectation::none(), ExprIsRead::Yes);
+        self.infer_binop_expr(expr, op, chain_lhs_expr, rhs_expr);
+        self.types.types.bool
+    }
+
+    fn chained_comparison_lhs(&self, expr: ExprId) -> Option<ExprId> {
+        match self.store[expr] {
+            hir_def::hir::Expr::BinaryOp { rhs, op: Some(BinaryOp::CmpOp(_)), .. } => Some(rhs),
+            _ => None,
         }
     }
 
@@ -200,8 +274,7 @@ impl<'db> InferenceContext<'db> {
         );
 
         // see `NB` above
-        let rhs_ty =
-            self.infer_expr_coerce(rhs_expr, &Expectation::HasType(rhs_ty_var), ExprIsRead::Yes);
+        let rhs_ty = self.infer_binop_rhs_expr(lhs_ty, rhs_expr, rhs_ty_var, op);
         let rhs_ty = self.table.resolve_vars_with_obligations(rhs_ty);
 
         let return_ty = match result {
@@ -257,6 +330,177 @@ impl<'db> InferenceContext<'db> {
         };
 
         (lhs_ty, rhs_ty, return_ty)
+    }
+
+    fn infer_binop_rhs_expr(
+        &mut self,
+        lhs_ty: Ty<'db>,
+        rhs_expr: ExprId,
+        rhs_ty_var: Ty<'db>,
+        op: BinaryOp,
+    ) -> Ty<'db> {
+        let expected = Expectation::HasType(rhs_ty_var);
+        let rhs_ty = self.infer_expr_inner(rhs_expr, &expected, ExprIsRead::Yes);
+        let resolved_rhs_ty = self.table.resolve_vars_with_obligations(rhs_ty);
+
+        if let Some(target) = expected.only_has_type(&mut self.table) {
+            match self.coerce(rhs_expr, rhs_ty, target, AllowTwoPhase::No, ExprIsRead::Yes) {
+                Ok(res) => res,
+                Err(_)
+                    if self.in_verus_spec_mode()
+                        && Self::is_verus_spec_comparison_op(op)
+                        && self.is_verus_spec_comparison(lhs_ty, resolved_rhs_ty) =>
+                {
+                    let target = self.table.resolve_vars_with_obligations(target);
+                    if self.is_verus_spec_comparison(lhs_ty, resolved_rhs_ty) {
+                        resolved_rhs_ty
+                    } else {
+                        self.emit_type_mismatch(rhs_expr.into(), target, rhs_ty);
+                        target
+                    }
+                }
+                Err(_) => {
+                    self.emit_type_mismatch(rhs_expr.into(), target, rhs_ty);
+                    target
+                }
+            }
+        } else {
+            rhs_ty
+        }
+    }
+
+    fn is_verus_spec_comparison(&self, lhs_ty: Ty<'db>, rhs_ty: Ty<'db>) -> bool {
+        lhs_ty.is_ty_var() || rhs_ty.is_ty_var() || self.is_verus_integer_comparison(lhs_ty, rhs_ty)
+    }
+
+    fn is_verus_integer_comparison(&self, lhs_ty: Ty<'db>, rhs_ty: Ty<'db>) -> bool {
+        let lhs_is_verus_integer = self.verus_integer_name_of_binop_ty(lhs_ty).is_some();
+        let rhs_is_verus_integer = self.verus_integer_name_of_binop_ty(rhs_ty).is_some();
+        let lhs_is_builtin_integer = is_builtin_integer(lhs_ty);
+        let rhs_is_builtin_integer = is_builtin_integer(rhs_ty);
+        let lhs_is_integer_var = is_integer_var(lhs_ty);
+        let rhs_is_integer_var = is_integer_var(rhs_ty);
+
+        lhs_is_verus_integer
+            && (rhs_is_verus_integer || rhs_is_builtin_integer || rhs_is_integer_var)
+            || rhs_is_verus_integer
+                && (lhs_is_verus_integer || lhs_is_builtin_integer || lhs_is_integer_var)
+            || lhs_is_builtin_integer && rhs_is_builtin_integer
+    }
+
+    fn is_verus_spec_comparison_op(op: BinaryOp) -> bool {
+        Self::is_verus_spec_ord_op(op) || matches!(op, BinaryOp::CmpOp(CmpOp::Eq { .. }))
+    }
+
+    fn is_verus_spec_ord_op(op: BinaryOp) -> bool {
+        matches!(op, BinaryOp::CmpOp(CmpOp::Ord { .. }))
+    }
+
+    fn verus_spec_arithmetic_ty(
+        &mut self,
+        expr: ExprId,
+        op: BinaryOp,
+        lhs_ty: Ty<'db>,
+        rhs_ty: Ty<'db>,
+    ) -> Option<Ty<'db>> {
+        let op = match op {
+            BinaryOp::ArithOp(
+                op @ (ArithOp::Add | ArithOp::Sub | ArithOp::Mul | ArithOp::Div | ArithOp::Rem),
+            ) => op,
+            _ => return None,
+        };
+
+        let lhs_ty = deref_ty_if_possible(lhs_ty);
+        let rhs_ty = deref_ty_if_possible(rhs_ty);
+        let lhs_name = self.verus_numeric_name_of_binop_ty(lhs_ty);
+        let rhs_name = self.verus_numeric_name_of_binop_ty(rhs_ty);
+
+        if matches!(lhs_name, Some("real")) {
+            return Some(lhs_ty);
+        }
+        if matches!(rhs_name, Some("real")) {
+            return Some(rhs_ty);
+        }
+
+        let lhs = self.verus_spec_integer_ty(lhs_ty)?;
+        let rhs = self.verus_spec_integer_ty(rhs_ty)?;
+
+        match op {
+            ArithOp::Add | ArithOp::Mul => {
+                if let Some(nat_ty) = lhs.nat_pair_result(rhs) {
+                    Some(nat_ty)
+                } else {
+                    Some(self.verus_named_numeric_ty(expr, "int"))
+                }
+            }
+            ArithOp::Sub => Some(self.verus_named_numeric_ty(expr, "int")),
+            ArithOp::Div => {
+                if lhs.has_same_concrete_type(rhs) || lhs.has_integer_var_operand(rhs) {
+                    if let Some(unsigned_ty) = lhs.unsigned_or_nat_pair_result(rhs) {
+                        Some(unsigned_ty)
+                    } else {
+                        Some(self.verus_named_numeric_ty(expr, "int"))
+                    }
+                } else {
+                    None
+                }
+            }
+            ArithOp::Rem => {
+                if lhs.has_same_concrete_type(rhs) || lhs.has_integer_var_operand(rhs) {
+                    lhs.concrete_ty().or_else(|| rhs.concrete_ty())
+                } else {
+                    None
+                }
+            }
+            ArithOp::Shl | ArithOp::Shr | ArithOp::BitXor | ArithOp::BitOr | ArithOp::BitAnd => {
+                None
+            }
+        }
+    }
+
+    fn verus_named_numeric_ty(&mut self, expr: ExprId, name: &str) -> Ty<'db> {
+        let path = Path::from(Name::new_root(name));
+        let (ty, _) = self.resolve_variant(expr.into(), &path, false);
+        if self.verus_numeric_name_of_binop_ty(ty) == Some(name) { ty } else { self.err_ty() }
+    }
+
+    fn verus_spec_integer_ty(&self, ty: Ty<'db>) -> Option<VerusSpecIntegerTy<'db>> {
+        let ty = deref_ty_if_possible(ty);
+        match ty.kind() {
+            TyKind::Int(_) => Some(VerusSpecIntegerTy::Signed(ty)),
+            TyKind::Uint(_) => Some(VerusSpecIntegerTy::Unsigned(ty)),
+            TyKind::Infer(InferTy::IntVar(_)) => Some(VerusSpecIntegerTy::IntVar),
+            _ => match self.verus_numeric_name_of_binop_ty(ty)? {
+                "int" => Some(VerusSpecIntegerTy::Int(ty)),
+                "nat" => Some(VerusSpecIntegerTy::Nat(ty)),
+                _ => None,
+            },
+        }
+    }
+
+    fn verus_integer_name_of_binop_ty(&self, ty: Ty<'db>) -> Option<&'static str> {
+        match self.verus_numeric_name_of_binop_ty(ty)? {
+            name @ ("int" | "nat") => Some(name),
+            _ => None,
+        }
+    }
+
+    fn verus_numeric_name_of_binop_ty(&self, ty: Ty<'db>) -> Option<&'static str> {
+        let ty = deref_ty_if_possible(ty);
+        let name = if let Some((AdtId::StructId(id), _)) = ty.as_adt() {
+            StructSignature::of(self.db, id).name.clone()
+        } else if let TyKind::Foreign(alias) = ty.kind() {
+            TypeAliasSignature::of(self.db, alias.0).name.clone()
+        } else {
+            return None;
+        };
+
+        match name.as_str() {
+            "int" => Some("int"),
+            "nat" => Some("nat"),
+            "real" => Some("real"),
+            _ => None,
+        }
     }
 
     pub(crate) fn infer_user_unop(
@@ -374,6 +618,75 @@ impl<'db> InferenceContext<'db> {
         };
         (method, trait_lang_item)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VerusSpecIntegerTy<'db> {
+    Int(Ty<'db>),
+    Nat(Ty<'db>),
+    Signed(Ty<'db>),
+    Unsigned(Ty<'db>),
+    IntVar,
+}
+
+impl<'db> VerusSpecIntegerTy<'db> {
+    fn concrete_ty(self) -> Option<Ty<'db>> {
+        match self {
+            VerusSpecIntegerTy::Int(ty)
+            | VerusSpecIntegerTy::Nat(ty)
+            | VerusSpecIntegerTy::Signed(ty)
+            | VerusSpecIntegerTy::Unsigned(ty) => Some(ty),
+            VerusSpecIntegerTy::IntVar => None,
+        }
+    }
+
+    fn is_int_var(self) -> bool {
+        matches!(self, VerusSpecIntegerTy::IntVar)
+    }
+
+    fn nat_pair_result(self, other: Self) -> Option<Ty<'db>> {
+        match (self, other) {
+            (VerusSpecIntegerTy::Nat(ty), VerusSpecIntegerTy::Nat(_))
+            | (VerusSpecIntegerTy::Nat(ty), VerusSpecIntegerTy::IntVar)
+            | (VerusSpecIntegerTy::IntVar, VerusSpecIntegerTy::Nat(ty)) => Some(ty),
+            _ => None,
+        }
+    }
+
+    fn unsigned_or_nat_pair_result(self, other: Self) -> Option<Ty<'db>> {
+        match (self, other) {
+            (VerusSpecIntegerTy::Unsigned(ty), VerusSpecIntegerTy::Unsigned(_))
+            | (VerusSpecIntegerTy::Unsigned(ty), VerusSpecIntegerTy::IntVar)
+            | (VerusSpecIntegerTy::IntVar, VerusSpecIntegerTy::Unsigned(ty))
+            | (VerusSpecIntegerTy::Nat(ty), VerusSpecIntegerTy::Nat(_))
+            | (VerusSpecIntegerTy::Nat(ty), VerusSpecIntegerTy::IntVar)
+            | (VerusSpecIntegerTy::IntVar, VerusSpecIntegerTy::Nat(ty)) => Some(ty),
+            _ => None,
+        }
+    }
+
+    fn has_same_concrete_type(self, other: Self) -> bool {
+        matches!(
+            (self, other),
+            (VerusSpecIntegerTy::Int(_), VerusSpecIntegerTy::Int(_))
+                | (VerusSpecIntegerTy::Nat(_), VerusSpecIntegerTy::Nat(_))
+        ) || match (self.concrete_ty(), other.concrete_ty()) {
+            (Some(lhs), Some(rhs)) => lhs == rhs,
+            _ => false,
+        }
+    }
+
+    fn has_integer_var_operand(self, other: Self) -> bool {
+        self.is_int_var() ^ other.is_int_var()
+    }
+}
+
+fn is_builtin_integer(ty: Ty<'_>) -> bool {
+    matches!(deref_ty_if_possible(ty).kind(), TyKind::Int(_) | TyKind::Uint(_))
+}
+
+fn is_integer_var(ty: Ty<'_>) -> bool {
+    matches!(deref_ty_if_possible(ty).kind(), TyKind::Infer(InferTy::IntVar(_)))
 }
 
 // Binary operator categories. These categories summarize the behavior

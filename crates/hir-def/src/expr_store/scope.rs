@@ -166,8 +166,15 @@ impl ExprScopes {
         if let Some(Param { formal: self_param, user_written: _ }) = body.self_param {
             scopes.add_bindings(body, root, self_param, body.binding_hygiene(self_param));
         }
-        body.params.iter().for_each(|param| scopes.add_pat_bindings(body, root, param.formal));
-        compute_expr_scopes(body.root_expr(), body, &mut scopes, &mut { root }, &mut root);
+        scopes.add_params_bindings(body, root, &body.params);
+        let mut roots = body.store.expr_roots();
+        if let Some(body_root) = roots.next() {
+            compute_expr_scopes(body_root, body, &mut scopes, &mut { root }, &mut root);
+        }
+        for root_expr in roots {
+            let mut scope = root;
+            compute_expr_scopes(root_expr, body, &mut scopes, &mut { scope }, &mut scope);
+        }
         scopes
     }
 
@@ -263,6 +270,19 @@ impl ExprScopes {
         pattern.walk_child_pats(|pat| self.add_pat_bindings(store, scope, pat));
     }
 
+    fn add_params_bindings(
+        &mut self,
+        store: &ExpressionStore,
+        scope: ScopeId,
+        params: &[Param<PatId>],
+    ) {
+        params.iter().for_each(|param| self.add_pat_bindings(store, scope, param.formal));
+    }
+
+    fn add_pat_list_bindings(&mut self, store: &ExpressionStore, scope: ScopeId, pats: &[PatId]) {
+        pats.iter().for_each(|pat| self.add_pat_bindings(store, scope, *pat));
+    }
+
     fn set_scope(&mut self, node: ExprId, scope: ScopeId) {
         self.scope_by_expr.insert(node, scope);
     }
@@ -321,7 +341,7 @@ fn compute_block_scopes(
 ) {
     for stmt in statements {
         match stmt {
-            Statement::Let { pat, initializer, else_branch, type_ref } => {
+            Statement::Let { pat, initializer, else_branch, type_ref, .. } => {
                 if let Some(type_ref) = type_ref {
                     compute_type_scopes(*type_ref, store, scopes, const_scope);
                 }
@@ -398,6 +418,9 @@ fn compute_expr_scopes(
         Expr::Unsafe { id, statements, tail } => {
             handle_block(*id, statements, *tail, None, scopes, scope, const_scope);
         }
+        Expr::ProofBlock { id, statements, tail } => {
+            handle_block(*id, statements, *tail, None, scopes, scope, const_scope);
+        }
         Expr::Loop { body: body_expr, label, source: _ } => {
             let mut scope = scopes.new_labeled_scope(*scope, *label);
             compute_expr_scopes(scopes, *body_expr, &mut scope, const_scope);
@@ -419,6 +442,12 @@ fn compute_expr_scopes(
             }
             let mut scope = scopes.new_scope(*scope);
             args.iter().for_each(|arg| scopes.add_pat_bindings(store, scope, *arg));
+            compute_expr_scopes(scopes, *body_expr, &mut scope, const_scope);
+        }
+        // verus
+        Expr::Quantifier { args, body: body_expr, .. } => {
+            let mut scope = scopes.new_scope(*scope);
+            scopes.add_pat_list_bindings(store, scope, args);
             compute_expr_scopes(scopes, *body_expr, &mut scope, const_scope);
         }
         Expr::Match { expr, arms } => {

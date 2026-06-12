@@ -225,6 +225,13 @@ impl<'db> Definition<'db> {
                 }
             }
             Definition::InlineAsmOperand(it) => name_range(it, sema).and_then(syn_ctx_is_root),
+            Definition::BroadcastGroup(it) => {
+                let src = <hir::BroadcastGroup as hir::HasSource>::source(it, sema.db)?;
+                let identifier = src.value.broadcast_group_identifier()?;
+                src.with_value(identifier.syntax())
+                    .original_file_range_opt(sema.db)
+                    .and_then(syn_ctx_is_root)
+            }
             Definition::BuiltinType(_)
             | Definition::BuiltinLifetime(_)
             | Definition::BuiltinAttr(_)

@@ -557,6 +557,18 @@ impl<'db> CompletionContext<'_, 'db> {
                 hir::ModuleDef::Trait(it) => self.is_visible(it),
                 hir::ModuleDef::TypeAlias(it) => self.is_visible(it),
                 hir::ModuleDef::Macro(it) => self.is_visible(it),
+                hir::ModuleDef::BroadcastGroup(it) => {
+                    let vis = hir::HasVisibility::visibility(it, self.db);
+                    if vis.is_visible_from(self.db, self.module.into()) {
+                        Visible::Yes
+                    } else if self.config.enable_private_editable
+                        && is_editable_crate(it.module(self.db).krate(self.db), self.db)
+                    {
+                        Visible::Editable
+                    } else {
+                        Visible::No
+                    }
+                }
                 hir::ModuleDef::BuiltinType(_) => Visible::Yes,
             },
             ScopeDef::GenericParam(_)

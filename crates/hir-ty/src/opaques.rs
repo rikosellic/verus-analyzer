@@ -50,7 +50,9 @@ pub(crate) fn opaque_types_defined_by<'db>(
             .iter()
             .filter_map(|&(_, assoc_id)| match assoc_id {
                 AssocItemId::TypeAliasId(it) => Some(it),
-                AssocItemId::FunctionId(_) | AssocItemId::ConstId(_) => None,
+                AssocItemId::FunctionId(_)
+                | AssocItemId::ConstId(_)
+                | AssocItemId::BroadcastGroupId(_) => None,
             })
             .for_each(extend_with_taits);
     };
@@ -197,6 +199,7 @@ fn tait_defining_bodies(
                 AssocItemId::FunctionId(it) => Some(it.into()),
                 AssocItemId::ConstId(it) => Some(it.into()),
                 AssocItemId::TypeAliasId(_) => None,
+                AssocItemId::BroadcastGroupId(_) => None,
             })
             .collect()
     };

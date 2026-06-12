@@ -3,7 +3,7 @@
 use hir_def::{
     AdtId,
     hir::ExprId,
-    signatures::{TraitFlags, TraitSignature},
+    signatures::{StructSignature, TraitFlags, TraitSignature},
 };
 use rustc_ast_ir::Mutability;
 use rustc_hash::FxHashSet;
@@ -54,11 +54,24 @@ impl<'db> CastTy<'db> {
             TyKind::Infer(InferTy::FloatVar(_)) => Some(Self::Float),
             TyKind::Float(_) => Some(Self::Float),
             TyKind::Adt(..) => {
-                let (AdtId::EnumId(id), _) = t.as_adt()? else {
-                    return None;
-                };
-                let enum_data = id.enum_variants(db);
-                if enum_data.is_payload_free(db) { Some(Self::Int(Int::CEnum)) } else { None }
+                let (adt_id, _) = t.as_adt()?;
+                match adt_id {
+                    AdtId::StructId(id) => match StructSignature::of(db, id).name.as_str() {
+                        "int" => Some(Self::Int(Int::I)),
+                        "nat" => Some(Self::Int(Int::U(UintTy::U128))),
+                        "real" => Some(Self::Float),
+                        _ => None,
+                    },
+                    AdtId::EnumId(id) => {
+                        let enum_data = id.enum_variants(db);
+                        if enum_data.is_payload_free(db) {
+                            Some(Self::Int(Int::CEnum))
+                        } else {
+                            None
+                        }
+                    }
+                    AdtId::UnionId(_) => None,
+                }
             }
             TyKind::RawPtr(ty, m) => Some(Self::Ptr(ty, m)),
             TyKind::FnPtr(..) => Some(Self::FnPtr),

@@ -1601,3 +1601,13 @@ async fn get_double_async(num: u32) -> u32 {
         false,
     );
 }
+
+#[test]
+fn verus_highlight_broadcast_group_no_crash() {
+    let (analysis, file_id) = fixture::file(
+        r#"
+broadcast group algebra_properties { }
+"#,
+    );
+    let _ = analysis.highlight(HL_CONFIG, file_id).unwrap();
+}

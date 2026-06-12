@@ -87,6 +87,7 @@ pub(crate) fn symbol_kind(symbol_kind: SymbolKind) -> lsp_types::SymbolKind {
         | SymbolKind::Label => lsp_types::SymbolKind::Variable,
         SymbolKind::Union => lsp_types::SymbolKind::Struct,
         SymbolKind::InlineAsmRegOrRegClass => lsp_types::SymbolKind::Variable,
+        SymbolKind::BroadcastGroup => lsp_types::SymbolKind::Namespace,
     }
 }
 
@@ -168,6 +169,7 @@ pub(crate) fn completion_item_kind(
             SymbolKind::BuiltinAttr => lsp_types::CompletionItemKind::Function,
             SymbolKind::ToolModule => lsp_types::CompletionItemKind::Module,
             SymbolKind::InlineAsmRegOrRegClass => lsp_types::CompletionItemKind::Keyword,
+            SymbolKind::BroadcastGroup => lsp_types::CompletionItemKind::Module,
         },
     }
 }
@@ -842,6 +844,7 @@ fn semantic_token_type_and_modifiers(
             SymbolKind::BuiltinAttr => SupportedType::BuiltinAttribute,
             SymbolKind::ToolModule => SupportedType::ToolModule,
             SymbolKind::InlineAsmRegOrRegClass => SupportedType::Keyword,
+            SymbolKind::BroadcastGroup => SupportedType::Namespace,
         },
         HlTag::AttributeBracket => SupportedType::AttributeBracket,
         HlTag::BoolLiteral => SupportedType::Boolean,
@@ -919,7 +922,7 @@ pub(crate) fn folding_range(
     let kind = match kind {
         FoldKind::Comment => Some(lsp_types::FoldingRangeKind::Comment),
         FoldKind::Imports => Some(lsp_types::FoldingRangeKind::Imports),
-        FoldKind::Region => Some(lsp_types::FoldingRangeKind::Region),
+        FoldKind::Region | FoldKind::ProofBlock => Some(lsp_types::FoldingRangeKind::Region),
         FoldKind::Modules
         | FoldKind::Block
         | FoldKind::ArgList
@@ -1965,7 +1968,7 @@ pub(crate) mod command {
 
         lsp_types::Command {
             title,
-            command: "rust-analyzer.showReferences".into(),
+            command: "verus-analyzer.showReferences".into(),
             arguments: Some(vec![
                 to_value(uri).unwrap(),
                 to_value(position).unwrap(),
@@ -1978,7 +1981,7 @@ pub(crate) mod command {
     pub(crate) fn run_single(runnable: &lsp_ext::Runnable, title: &str) -> lsp_types::Command {
         lsp_types::Command {
             title: title.to_owned(),
-            command: "rust-analyzer.runSingle".into(),
+            command: "verus-analyzer.runSingle".into(),
             arguments: Some(vec![to_value(runnable).unwrap()]),
             tooltip: None,
         }
@@ -1987,7 +1990,7 @@ pub(crate) mod command {
     pub(crate) fn debug_single(runnable: &lsp_ext::Runnable) -> lsp_types::Command {
         lsp_types::Command {
             title: "⚙\u{fe0e} Debug".into(),
-            command: "rust-analyzer.debugSingle".into(),
+            command: "verus-analyzer.debugSingle".into(),
             arguments: Some(vec![to_value(runnable).unwrap()]),
             tooltip: None,
         }
@@ -1996,7 +1999,7 @@ pub(crate) mod command {
     pub(crate) fn interpret_single(_runnable: &lsp_ext::Runnable) -> lsp_types::Command {
         lsp_types::Command {
             title: "Interpret".into(),
-            command: "rust-analyzer.interpretFunction".into(),
+            command: "verus-analyzer.interpretFunction".into(),
             // FIXME: use the `_runnable` here.
             arguments: Some(vec![]),
             tooltip: None,
@@ -2018,7 +2021,7 @@ pub(crate) mod command {
 
         Some(lsp_types::Command {
             title: nav.name.to_string(),
-            command: "rust-analyzer.gotoLocation".into(),
+            command: "verus-analyzer.gotoLocation".into(),
             arguments: Some(vec![value]),
             tooltip: None,
         })
@@ -2027,7 +2030,7 @@ pub(crate) mod command {
     pub(crate) fn trigger_parameter_hints() -> lsp_types::Command {
         lsp_types::Command {
             title: "triggerParameterHints".into(),
-            command: "rust-analyzer.triggerParameterHints".into(),
+            command: "verus-analyzer.triggerParameterHints".into(),
             arguments: None,
             tooltip: None,
         }
@@ -2036,7 +2039,7 @@ pub(crate) mod command {
     pub(crate) fn rename() -> lsp_types::Command {
         lsp_types::Command {
             title: "rename".into(),
-            command: "rust-analyzer.rename".into(),
+            command: "verus-analyzer.rename".into(),
             arguments: None,
             tooltip: None,
         }

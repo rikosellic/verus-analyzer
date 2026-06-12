@@ -926,6 +926,8 @@ impl PerNs {
             ModuleDefId::TypeAliasId(_) => PerNs::types(def, v, import),
             ModuleDefId::BuiltinType(_) => PerNs::types(def, v, import),
             ModuleDefId::MacroId(mac) => PerNs::macros(mac, v, import),
+            // verus: broadcast group is in the types namespace (navigable by name)
+            ModuleDefId::BroadcastGroupId(_) => PerNs::types(def, v, import),
         }
     }
 }

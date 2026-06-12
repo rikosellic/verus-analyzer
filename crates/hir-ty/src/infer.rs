@@ -36,6 +36,7 @@ use std::{
     convert::identity,
     fmt,
     hash::Hash,
+    mem,
     ops::Deref,
 };
 
@@ -46,13 +47,17 @@ use hir_def::{
     FunctionId, GenericDefId, GenericParamId, HasModule, LocalFieldId, Lookup, StaticId, TraitId,
     TupleFieldId, TupleId, VariantId,
     attrs::AttrFlags,
-    expr_store::{Body, ExpressionStore, HygieneId, body::Param, path::Path},
+    expr_store::{
+        Body, ExpressionStore, HygieneId, RootExprOrigin,
+        body::Param,
+        path::{GenericArg, Path},
+    },
     hir::{BindingId, ExprId, ExprOrPatId, ExprOrPatIdPacked, LabelId, PatId},
     lang_item::LangItems,
     layout::Integer,
     resolver::{HasResolver, ResolveValueResult, Resolver, TypeNs, ValueNs},
     signatures::{ConstSignature, EnumSignature, FunctionSignature, StaticSignature},
-    type_ref::{LifetimeRefId, TypeRefId},
+    type_ref::{LifetimeRefId, TypeRef, TypeRefId},
     unstable_features::UnstableFeatures,
 };
 use hir_expand::{mod_path::ModPath, name::Name};
@@ -179,9 +184,25 @@ pub fn infer_query_with_inspect<'db>(
         }
     }
 
-    ctx.infer_body(body.root_expr());
+    let body_root = body.root_expr();
+    ctx.infer_body(body_root);
 
-    ctx.infer_mut_body(body.root_expr());
+    for (root_expr, origin) in body.store.expr_roots_with_origins().skip(1) {
+        let expected = match origin {
+            RootExprOrigin::VerusContract => Expectation::has_type(ctx.types.types.bool),
+            RootExprOrigin::ArrayLength
+            | RootExprOrigin::ConstParam(_)
+            | RootExprOrigin::GenericArgsPath
+            | RootExprOrigin::BodyRoot => Expectation::None,
+        };
+        if matches!(origin, RootExprOrigin::VerusContract) {
+            ctx.with_verus_spec_mode(|ctx| ctx.infer_expr(root_expr, &expected, ExprIsRead::Yes));
+        } else {
+            ctx.infer_expr(root_expr, &expected, ExprIsRead::Yes);
+        }
+    }
+
+    ctx.infer_mut_body(body_root);
 
     infer_finalize(ctx)
 }
@@ -1326,6 +1347,7 @@ pub(crate) struct InferenceContext<'db> {
     return_coercion: Option<DynamicCoerceMany<'db>>,
     /// The resume type and the yield type, respectively, of the coroutine being inferred.
     resume_yield_tys: Option<(Ty<'db>, Ty<'db>)>,
+    verus_expr_mode: VerusExprMode,
     diverges: Diverges,
     breakables: Vec<BreakableContext<'db>>,
     types: &'db crate::next_solver::DefaultAny<'db>,
@@ -1362,6 +1384,12 @@ enum BreakableKind {
     /// A border is something like an async block, closure etc. Anything that prevents
     /// breaking/continuing through
     Border,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VerusExprMode {
+    Exec,
+    Spec,
 }
 
 fn find_breakable<'a, 'db>(
@@ -1414,6 +1442,7 @@ impl<'db> InferenceContext<'db> {
             tuple_field_accesses_rev: Default::default(),
             resume_yield_tys: None,
             return_coercion: None,
+            verus_expr_mode: VerusExprMode::Exec,
             db,
             owner,
             store_owner,
@@ -1529,6 +1558,17 @@ impl<'db> InferenceContext<'db> {
     #[inline]
     fn krate(&self) -> Crate {
         self.resolver.krate()
+    }
+
+    pub(crate) fn in_verus_spec_mode(&self) -> bool {
+        self.verus_expr_mode == VerusExprMode::Spec
+    }
+
+    pub(crate) fn with_verus_spec_mode<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let old_mode = mem::replace(&mut self.verus_expr_mode, VerusExprMode::Spec);
+        let result = f(self);
+        self.verus_expr_mode = old_mode;
+        result
     }
 
     fn target_features(&self) -> (&TargetFeatures<'db>, TargetFeatureIsSafeInTarget) {
@@ -1755,6 +1795,9 @@ impl<'db> InferenceContext<'db> {
         params: &[Param<PatId>],
     ) {
         let data = FunctionSignature::of(self.db, func);
+        if data.is_spec() || data.is_proof() || data.is_axiom() {
+            self.verus_expr_mode = VerusExprMode::Spec;
+        }
         let mut param_tys = self.with_ty_lowering(
             &data.store,
             InferenceTyDiagnosticSource::Signature,
@@ -1781,16 +1824,42 @@ impl<'db> InferenceContext<'db> {
 
             param_tys.push(va_list_ty);
         }
+        let mut param_type_refs = data.params.iter().copied();
         let mut param_tys = param_tys.into_iter();
         if let Some(self_param) = self_param
             && let Some(ty) = param_tys.next()
         {
+            let _ = param_type_refs.next();
             let ty = self.process_user_written_ty(ty);
             self.write_binding_ty(self_param, ty);
         }
         for pat in params {
+            let type_ref = param_type_refs.next();
             let ty = param_tys.next().unwrap_or_else(|| self.table.next_ty_var(Span::Dummy));
             let ty = self.process_user_written_ty(ty);
+            if let Some(inner_ty) = type_ref.and_then(|type_ref| {
+                Self::verus_tracked_or_ghost_inner_type_ref(
+                    &self.store,
+                    pat.formal,
+                    &data.store,
+                    type_ref,
+                )
+            }) {
+                let inner_ty = self.with_ty_lowering(
+                    &data.store,
+                    InferenceTyDiagnosticSource::Signature,
+                    ExpressionStoreOwnerId::Signature(func.into()),
+                    LifetimeElisionKind::for_fn_params(data),
+                    |ctx| ctx.lower_ty(inner_ty),
+                );
+                let inner_ty = self.process_user_written_ty(inner_ty);
+
+                if let hir_def::hir::Pat::TupleStruct { args, .. } = &self.store[pat.formal] {
+                    self.write_pat_ty(pat.formal, ty);
+                    self.infer_top_pat(args[0], inner_ty, PatOrigin::Param);
+                    continue;
+                }
+            }
 
             self.infer_top_pat(pat.formal, ty, PatOrigin::Param);
         }
@@ -1812,6 +1881,47 @@ impl<'db> InferenceContext<'db> {
         };
 
         self.return_coercion = Some(CoerceMany::new(self.return_ty));
+    }
+
+    fn verus_tracked_or_ghost_inner_type_ref(
+        body_store: &ExpressionStore,
+        pat: PatId,
+        sig_store: &ExpressionStore,
+        type_ref: TypeRefId,
+    ) -> Option<TypeRefId> {
+        let hir_def::hir::Pat::TupleStruct { path: pat_path, args, ellipsis: None } =
+            &body_store[pat]
+        else {
+            return None;
+        };
+        if args.len() != 1 {
+            return None;
+        }
+
+        let wrapper_name = pat_path.segments().last()?.name;
+        if !Self::is_verus_tracked_or_ghost_name(wrapper_name) {
+            return None;
+        }
+
+        let TypeRef::Path(type_path) = &sig_store[type_ref] else { return None };
+        let type_segment = type_path.segments().last()?;
+        if type_segment.name != wrapper_name {
+            return None;
+        }
+
+        let generic_args = type_segment.args_and_bindings?;
+        if !generic_args.bindings.is_empty() || generic_args.args.len() != 1 {
+            return None;
+        }
+
+        match generic_args.args[0] {
+            GenericArg::Type(inner_type_ref) => Some(inner_type_ref),
+            GenericArg::Lifetime(_) | GenericArg::Const(_) => None,
+        }
+    }
+
+    fn is_verus_tracked_or_ghost_name(name: &Name) -> bool {
+        name == &Name::new_root("Tracked") || name == &Name::new_root("Ghost")
     }
 
     #[inline]

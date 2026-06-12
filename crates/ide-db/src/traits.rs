@@ -48,6 +48,7 @@ pub fn get_missing_assoc_items(
             hir::AssocItem::TypeAlias(it) => {
                 impl_type.insert(it.name(sema.db));
             }
+            hir::AssocItem::BroadcastGroup(_) => {}
         }
     }
 
@@ -81,6 +82,7 @@ pub fn get_missing_assoc_items(
             hir::AssocItem::Const(c) => {
                 c.name(sema.db).map(|n| !impl_fns_consts.contains(&n)).unwrap_or_default()
             }
+            hir::AssocItem::BroadcastGroup(_) => false,
         })
         .collect()
 }
@@ -121,11 +123,13 @@ fn assoc_item_of_trait<'db>(
         Function(it) => it.name(db),
         Const(it) => it.name(db)?,
         TypeAlias(it) => it.name(db),
+        BroadcastGroup(_) => return None,
     };
     let item = trait_.items(db).into_iter().find(|it| match (it, assoc) {
         (Function(trait_func), Function(_)) => trait_func.name(db) == name,
         (Const(trait_konst), Const(_)) => trait_konst.name(db).map_or(false, |it| it == name),
         (TypeAlias(trait_type_alias), TypeAlias(_)) => trait_type_alias.name(db) == name,
+        (BroadcastGroup(_), BroadcastGroup(_)) => true,
         _ => false,
     })?;
     Some(Definition::from(item))

@@ -170,6 +170,8 @@ impl HlTag {
                 SymbolKind::Union => "union",
                 SymbolKind::ValueParam => "value_param",
                 SymbolKind::Variant => "enum_variant",
+                // verus
+                SymbolKind::BroadcastGroup => "broadcast_group",
             },
             HlTag::AttributeBracket => "attribute_bracket",
             HlTag::BoolLiteral => "bool_literal",

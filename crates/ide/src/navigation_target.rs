@@ -288,6 +288,7 @@ impl<'db> TryToNav for FileSymbol<'db> {
                         hir::ModuleDef::Macro(it) => {
                             Some(it.display(db, display_target).to_string())
                         }
+                        hir::ModuleDef::BroadcastGroup(_) => None,
                         hir::ModuleDef::BuiltinType(_) => None,
                     },
                 }
@@ -320,6 +321,8 @@ impl TryToNav for Definition<'_> {
             Definition::ExternCrateDecl(it) => it.try_to_nav(sema),
             Definition::InlineAsmOperand(it) => it.try_to_nav(sema),
             Definition::BuiltinType(it) => it.try_to_nav(sema),
+            // verus
+            Definition::BroadcastGroup(it) => it.try_to_nav(sema),
             Definition::BuiltinLifetime(_)
             | Definition::TupleField(_)
             | Definition::ToolModule(_)
@@ -346,6 +349,7 @@ impl TryToNav for hir::ModuleDef {
             hir::ModuleDef::Trait(it) => it.try_to_nav(sema),
             hir::ModuleDef::TypeAlias(it) => it.try_to_nav(sema),
             hir::ModuleDef::Macro(it) => it.try_to_nav(sema),
+            hir::ModuleDef::BroadcastGroup(it) => it.try_to_nav(sema),
             hir::ModuleDef::BuiltinType(_) => None,
         }
     }
@@ -623,7 +627,41 @@ impl TryToNav for hir::AssocItem {
             AssocItem::Function(it) => it.try_to_nav(sema),
             AssocItem::Const(it) => it.try_to_nav(sema),
             AssocItem::TypeAlias(it) => it.try_to_nav(sema),
+            // verus
+            AssocItem::BroadcastGroup(it) => it.try_to_nav(sema),
         }
+    }
+}
+
+// verus: navigation for `broadcast group <name> { ... }` declarations.
+impl TryToNav for hir::BroadcastGroup {
+    fn try_to_nav(
+        &self,
+        sema: &Semantics<'_, RootDatabase>,
+    ) -> Option<UpmappingResult<NavigationTarget>> {
+        let db = sema.db;
+        let src = self.source(db)?;
+        let full_range = src.value.syntax().text_range();
+        let focus_range = src
+            .value
+            .broadcast_group_identifier()
+            .and_then(|i| i.ident_token())
+            .map(|tok| tok.text_range());
+        let name = self
+            .name(db)
+            .map(|it| it.symbol().clone())
+            .unwrap_or_else(|| Symbol::intern("broadcast_group"));
+        Some(orig_range_with_focus_r(db, src.file_id, full_range, focus_range).map(
+            |(FileRange { file_id, range: full_range }, focus_range)| {
+                NavigationTarget::from_syntax(
+                    file_id,
+                    name.clone(),
+                    focus_range,
+                    full_range,
+                    SymbolKind::BroadcastGroup,
+                )
+            },
+        ))
     }
 }
 

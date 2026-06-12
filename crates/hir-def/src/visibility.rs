@@ -348,6 +348,12 @@ impl AssocItemId {
                     visibility_from_ast(db, type_alias_id, source.map(|src| src.visibility()))
                 })
             }
+            // verus: broadcast groups inside an impl/trait. There is no per-trait
+            // visibility coupling here; just read the visibility from the AST.
+            AssocItemId::BroadcastGroupId(bg_id) => {
+                let source = bg_id.lookup(db).source(db);
+                visibility_from_ast(db, bg_id, source.map(|src| src.visibility()))
+            }
         }
     }
 }

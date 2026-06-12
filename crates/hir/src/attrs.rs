@@ -282,6 +282,7 @@ impl HasAttrs for AssocItem {
             AssocItem::Function(it) => it.attr_id(db),
             AssocItem::Const(it) => it.attr_id(db),
             AssocItem::TypeAlias(it) => it.attr_id(db),
+            AssocItem::BroadcastGroup(_) => AttrsOwner::Dummy,
         }
     }
 }
@@ -381,13 +382,14 @@ fn resolve_assoc_or_field(
         // Doc paths in this context may only resolve to an item of this trait
         // (i.e. no items of its supertraits), so we need to handle them here
         // independently of others.
-        id.trait_items(db).items.iter().find(|it| it.0 == name).map(|(_, assoc_id)| {
+        id.trait_items(db).items.iter().find(|it| it.0 == name).and_then(|(_, assoc_id)| {
             let def = match *assoc_id {
                 AssocItemId::FunctionId(it) => ModuleDef::Function(it.into()),
                 AssocItemId::ConstId(it) => ModuleDef::Const(it.into()),
                 AssocItemId::TypeAliasId(it) => ModuleDef::TypeAlias(it.into()),
+                AssocItemId::BroadcastGroupId(_) => return None,
             };
-            DocLinkDef::ModuleDef(def)
+            Some(DocLinkDef::ModuleDef(def))
         })
     };
     let ty = match base_def {
@@ -541,6 +543,7 @@ fn as_module_def_if_namespace_matches(
         AssocItem::Function(it) => (ModuleDef::Function(it), Namespace::Values),
         AssocItem::Const(it) => (ModuleDef::Const(it), Namespace::Values),
         AssocItem::TypeAlias(it) => (ModuleDef::TypeAlias(it), Namespace::Types),
+        AssocItem::BroadcastGroup(_) => return None,
     };
 
     (ns.unwrap_or(expected_ns) == expected_ns).then_some(DocLinkDef::ModuleDef(def))

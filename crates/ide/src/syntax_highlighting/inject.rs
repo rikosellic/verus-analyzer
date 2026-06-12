@@ -242,6 +242,8 @@ fn module_def_to_hl_tag(db: &dyn HirDatabase, def: Definition<'_>) -> HlTag {
         Definition::DeriveHelper(_) => SymbolKind::DeriveHelper,
         Definition::InlineAsmRegOrRegClass(_) => SymbolKind::InlineAsmRegOrRegClass,
         Definition::InlineAsmOperand(_) => SymbolKind::Local,
+        // verus
+        Definition::BroadcastGroup(_) => SymbolKind::BroadcastGroup,
     };
     HlTag::Symbol(symbol)
 }

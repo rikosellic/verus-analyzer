@@ -80,6 +80,7 @@ pub(crate) fn reorder_impl_items(acc: &mut Assists, ctx: &AssistContext<'_, '_>)
                 ast::AssocItem::Fn(f) => f.name(),
                 ast::AssocItem::TypeAlias(t) => t.name(),
                 ast::AssocItem::MacroCall(_) => None,
+                ast::AssocItem::BroadcastGroup(_) => None,
             };
 
             name.and_then(|n| ranks.get(n.text().as_str().trim_start_matches("r#")).copied())

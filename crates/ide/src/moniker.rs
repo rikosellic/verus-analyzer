@@ -235,6 +235,8 @@ pub(crate) fn def_to_kind(db: &RootDatabase, def: Definition<'_>) -> SymbolInfor
         Definition::ToolModule(..) => Module,
         Definition::ExternCrateDecl(..) => Module,
         Definition::InlineAsmRegOrRegClass(..) => Module,
+        // verus
+        Definition::BroadcastGroup(..) => Module,
     }
 }
 

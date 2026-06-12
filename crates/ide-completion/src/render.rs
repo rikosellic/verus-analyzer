@@ -511,7 +511,10 @@ fn render_resolution_path<'db>(
         }
         // Filtered out above
         ScopeDef::ModuleDef(
-            ModuleDef::Function(_) | ModuleDef::EnumVariant(_) | ModuleDef::Macro(_),
+            ModuleDef::Function(_)
+            | ModuleDef::EnumVariant(_)
+            | ModuleDef::Macro(_)
+            | ModuleDef::BroadcastGroup(_),
         ) => (),
         ScopeDef::ModuleDef(ModuleDef::Const(konst)) => set_item_relevance(konst.ty(db)),
         ScopeDef::ModuleDef(ModuleDef::Static(stat)) => set_item_relevance(stat.ty(db)),
@@ -576,6 +579,9 @@ fn res_to_kind(resolution: ScopeDef<'_>) -> CompletionItemKind {
         ScopeDef::ModuleDef(Trait(..)) => CompletionItemKind::SymbolKind(SymbolKind::Trait),
         ScopeDef::ModuleDef(TypeAlias(..)) => CompletionItemKind::SymbolKind(SymbolKind::TypeAlias),
         ScopeDef::ModuleDef(BuiltinType(..)) => CompletionItemKind::BuiltinType,
+        ScopeDef::ModuleDef(BroadcastGroup(..)) => {
+            CompletionItemKind::SymbolKind(SymbolKind::BroadcastGroup)
+        }
         ScopeDef::GenericParam(param) => CompletionItemKind::SymbolKind(match param {
             hir::GenericParam::TypeParam(_) => SymbolKind::TypeParam,
             hir::GenericParam::ConstParam(_) => SymbolKind::ConstParam,

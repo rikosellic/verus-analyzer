@@ -130,6 +130,7 @@ pub fn generic_def_for_node(
                         it.parent_enum(sema.db).into()
                     },
                     hir::PathResolution::Def(hir::ModuleDef::BuiltinType(_))
+                    | hir::PathResolution::Def(hir::ModuleDef::BroadcastGroup(_))
                     | hir::PathResolution::Def(hir::ModuleDef::Const(_))
                     | hir::PathResolution::Def(hir::ModuleDef::Macro(_))
                     | hir::PathResolution::Def(hir::ModuleDef::Module(_))

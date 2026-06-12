@@ -54,6 +54,13 @@ pub(crate) fn trait_impl_redundant_assoc_item(
                 format!("\ntype {};", type_alias.name(ctx.sema.db).display_no_db(ctx.edition)),
             )
         }
+        // verus: a `broadcast group` is a verus-specific assoc item; we just
+        // surface the name without trying to synthesise the trait-side entry.
+        hir::AssocItem::BroadcastGroup(bg) => (
+            format!("`broadcast group {redundant_assoc_item_name}`"),
+            bg.source(db).map(|it| it.syntax().text_range()).unwrap_or(default_range),
+            String::new(),
+        ),
     };
 
     let hir::FileRange { file_id, range } =
@@ -147,6 +154,7 @@ fn find_insert_after(
             syntax::ast::AssocItem::Fn(it) => it.name(),
             syntax::ast::AssocItem::TypeAlias(it) => it.name(),
             syntax::ast::AssocItem::MacroCall(_) => None,
+            syntax::ast::AssocItem::BroadcastGroup(_) => None,
         }
     }
 }

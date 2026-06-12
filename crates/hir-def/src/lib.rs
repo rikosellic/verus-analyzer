@@ -376,6 +376,13 @@ impl ExternBlockId {
     }
 }
 
+// verus: broadcast group item (e.g. `pub broadcast group Ring_properties { ... }`)
+// verus: a `broadcast group` can appear inside a module, an `impl` block, or
+// a `trait`. Using `AssocItemLoc` lets the loc carry the enclosing
+// `ItemContainerId` uniformly.
+pub type BroadcastGroupLoc = AssocItemLoc<ast::BroadcastGroup>;
+impl_intern!(BroadcastGroupId, BroadcastGroupLoc);
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EnumVariantLoc {
     pub id: AstId<ast::Variant>,
@@ -831,6 +838,8 @@ pub enum ModuleDefId {
     TypeAliasId(TypeAliasId),
     BuiltinType(BuiltinType),
     MacroId(MacroId),
+    // verus
+    BroadcastGroupId(BroadcastGroupId),
 }
 impl_from!(
     MacroId(Macro2Id, MacroRulesId, ProcMacroId),
@@ -842,7 +851,8 @@ impl_from!(
     StaticId,
     TraitId,
     TypeAliasId,
-    BuiltinType
+    BuiltinType,
+    BroadcastGroupId
     for ModuleDefId
 );
 
@@ -894,22 +904,29 @@ pub enum AssocItemId {
     FunctionId(FunctionId),
     ConstId(ConstId),
     TypeAliasId(TypeAliasId),
+    // verus: `broadcast group` items can appear inside `impl` blocks and act as
+    // named groups of broadcast lemmas. They do not participate in the type
+    // system (no signature, no generics), but they need to be name-resolvable
+    // so that `Type::group_name` can navigate to its definition.
+    BroadcastGroupId(BroadcastGroupId),
 }
 
 // FIXME: not every function, ... is actually an assoc item. maybe we should make
 // sure that you can only turn actual assoc items into AssocItemIds. This would
 // require not implementing From, and instead having some checked way of
 // casting them, and somehow making the constructors private, which would be annoying.
-impl_from!(FunctionId, ConstId, TypeAliasId for AssocItemId);
+impl_from!(FunctionId, ConstId, TypeAliasId, BroadcastGroupId for AssocItemId);
 
-impl_from!(
-    AssocItemId {
-        FunctionId => FunctionId,
-        ConstId => ConstId,
-        TypeAliasId => TypeAliasId,
+impl From<AssocItemId> for ModuleDefId {
+    fn from(item: AssocItemId) -> Self {
+        match item {
+            AssocItemId::FunctionId(f) => f.into(),
+            AssocItemId::ConstId(c) => c.into(),
+            AssocItemId::TypeAliasId(t) => t.into(),
+            AssocItemId::BroadcastGroupId(b) => b.into(),
+        }
     }
-    for ModuleDefId
-);
+}
 
 #[derive(Debug, PartialOrd, Ord, Clone, Copy, PartialEq, Eq, Hash, salsa::Supertype)]
 pub enum GenericDefId {
@@ -1049,14 +1066,20 @@ impl GenericDefId {
     }
 }
 
-impl_from!(
-    AssocItemId {
-        FunctionId => FunctionId,
-        ConstId => ConstId,
-        TypeAliasId => TypeAliasId,
+impl From<AssocItemId> for GenericDefId {
+    fn from(item: AssocItemId) -> Self {
+        match item {
+            AssocItemId::FunctionId(f) => f.into(),
+            AssocItemId::ConstId(c) => c.into(),
+            AssocItemId::TypeAliasId(t) => t.into(),
+            // verus: broadcast groups have no generic parameters; this conversion
+            // should never be reached for them.
+            AssocItemId::BroadcastGroupId(_) => unreachable!(
+                "GenericDefId::from(AssocItemId::BroadcastGroupId) is not supported; broadcast groups have no generics"
+            ),
+        }
     }
-    for GenericDefId
-);
+}
 
 #[derive(Debug, PartialOrd, Ord, Clone, Copy, PartialEq, Eq, Hash, salsa::Supertype)]
 pub enum CallableDefId {
@@ -1117,11 +1140,29 @@ impl_from!(
     for AttrDefId
 );
 
-impl_from!(AssocItemId { FunctionId, ConstId, TypeAliasId } for AttrDefId);
-impl_from!(
-    VariantId { EnumVariantId => EnumVariantId, StructId => AdtId, UnionId => AdtId }
-    for AttrDefId
-);
+impl From<AssocItemId> for AttrDefId {
+    fn from(assoc: AssocItemId) -> Self {
+        match assoc {
+            AssocItemId::FunctionId(it) => AttrDefId::FunctionId(it),
+            AssocItemId::ConstId(it) => AttrDefId::ConstId(it),
+            AssocItemId::TypeAliasId(it) => AttrDefId::TypeAliasId(it),
+            // verus: broadcast groups carry attributes via their enclosing impl;
+            // we don't yet expose them as a distinct AttrDefId.
+            AssocItemId::BroadcastGroupId(_) => {
+                unreachable!("AttrDefId::from(AssocItemId::BroadcastGroupId) is not supported")
+            }
+        }
+    }
+}
+impl From<VariantId> for AttrDefId {
+    fn from(vid: VariantId) -> Self {
+        match vid {
+            VariantId::EnumVariantId(id) => id.into(),
+            VariantId::StructId(id) => id.into(),
+            VariantId::UnionId(id) => id.into(),
+        }
+    }
+}
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, salsa::Supertype, salsa::Update,
@@ -1272,6 +1313,15 @@ impl HasModule for TypeAliasId {
 }
 // endregion: manual-assoc-has-module-impls
 
+// verus: BroadcastGroup uses AssocItemLoc so it has the same shape as other
+// assoc items, but its container can also be a `ModuleId`.
+impl HasModule for BroadcastGroupId {
+    #[inline]
+    fn module(&self, db: &dyn SourceDatabase) -> ModuleId {
+        module_for_assoc_item_loc(db, *self)
+    }
+}
+
 impl HasModule for EnumVariantId {
     #[inline]
     fn module(&self, db: &dyn SourceDatabase) -> ModuleId {
@@ -1411,6 +1461,7 @@ impl ModuleDefId {
             ModuleDefId::TraitId(id) => id.module(db),
             ModuleDefId::TypeAliasId(id) => id.module(db),
             ModuleDefId::MacroId(id) => id.module(db),
+            ModuleDefId::BroadcastGroupId(id) => id.module(db),
             ModuleDefId::BuiltinType(_) => return None,
         })
     }

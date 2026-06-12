@@ -19,7 +19,7 @@ use crate::{
     expr_store::path::{GenericArg, GenericArgs},
     hir::{
         Array, BindingAnnotation, CaptureBy, ClosureKind, CoroutineKind, Literal, Movability,
-        RecordSpread, Statement,
+        QuantifierKind, RecordSpread, Statement,
         generics::{GenericParams, WherePredicate},
     },
     lang_item::LangItemTarget,
@@ -287,6 +287,18 @@ pub fn print_function(
     };
     if flags.contains(FnFlags::CONST) {
         w!(p, "const ");
+    }
+    if flags.contains(FnFlags::VERUS_SPEC_OPEN) {
+        w!(p, "open ");
+    } else if flags.contains(FnFlags::VERUS_SPEC_CLOSED) {
+        w!(p, "closed ");
+    }
+    if flags.contains(FnFlags::VERUS_SPEC) {
+        w!(p, "spec ");
+    } else if flags.contains(FnFlags::VERUS_PROOF) {
+        w!(p, "proof ");
+    } else if flags.contains(FnFlags::VERUS_AXIOM) {
+        w!(p, "axiom ");
     }
     if flags.contains(FnFlags::ASYNC) {
         w!(p, "async ");
@@ -876,6 +888,84 @@ impl Printer<'_> {
                 w!(self, " = ");
                 self.print_expr_in(prec, value);
             }
+            // verus
+            Expr::ProofBlock { id: _, statements, tail } => {
+                self.print_block(Some("proof "), statements, tail);
+            }
+            Expr::Assert { condition, body } => {
+                w!(self, "assert ");
+                self.print_expr(*condition);
+                if let Some(b) = *body {
+                    w!(self, " proof_block ");
+                    self.print_expr(b);
+                }
+            }
+            Expr::Assume { condition } => {
+                w!(self, "assume ");
+                self.print_expr(*condition);
+            }
+            Expr::Final { expr } => {
+                w!(self, "final(");
+                self.print_expr(*expr);
+                w!(self, ")");
+            }
+            Expr::View { condition } => {
+                w!(self, "view ");
+                self.print_expr(*condition);
+            }
+            Expr::IsExpr { expr, type_ref } => {
+                self.print_expr(*expr);
+                w!(self, " is ");
+                self.print_type_ref(*type_ref);
+            }
+            Expr::HasExpr { expr_collection, expr_elt } => {
+                self.print_expr(*expr_collection);
+                w!(self, " has ");
+                self.print_expr(*expr_elt);
+            }
+            Expr::ArrowExpr { expr, name } => {
+                self.print_expr(*expr);
+                w!(self, "->");
+                w!(self, "{}", name.display(self.db, self.edition));
+            }
+            Expr::MatchesExpr { expr, pat } => {
+                self.print_expr(*expr);
+                w!(self, " matches ");
+                self.print_pat(*pat);
+            }
+            Expr::AssertForall { closure, implies, body } => {
+                w!(self, "assert ");
+                self.print_expr(*closure);
+                if let Some(i) = *implies {
+                    w!(self, " implies ");
+                    self.print_expr(i);
+                }
+                if let Some(b) = *body {
+                    w!(self, " by ");
+                    self.print_expr(b);
+                }
+            }
+            Expr::Quantifier { kind, args, arg_types, body } => {
+                match kind {
+                    QuantifierKind::Forall => w!(self, "forall "),
+                    QuantifierKind::Exists => w!(self, "exists "),
+                    QuantifierKind::Choose => w!(self, "choose "),
+                }
+                w!(self, "|");
+                for (i, (pat, ty)) in args.iter().zip(arg_types.iter()).enumerate() {
+                    if i != 0 {
+                        w!(self, ", ");
+                    }
+                    self.print_pat(*pat);
+                    if let Some(ty) = ty {
+                        w!(self, ": ");
+                        self.print_type_ref(*ty);
+                    }
+                }
+                w!(self, "|");
+                self.whitespace();
+                self.print_expr(*body);
+            }
         }
 
         if needs_parens {
@@ -1060,7 +1150,7 @@ impl Printer<'_> {
 
     fn print_stmt(&mut self, stmt: &Statement) {
         match stmt {
-            Statement::Let { pat, type_ref, initializer, else_branch } => {
+            Statement::Let { pat, type_ref, initializer, else_branch, is_verus_spec_mode: _ } => {
                 w!(self, "let ");
                 self.print_pat(*pat);
                 if let Some(ty) = type_ref {
@@ -1107,6 +1197,9 @@ impl Printer<'_> {
                     w!(self, "{}", suffix);
                 }
             }
+            Literal::VerusInt(i) => w!(self, "{}int", i),
+            Literal::VerusNat(i) => w!(self, "{}nat", i),
+            Literal::VerusReal(f) => w!(self, "{}real", f),
             Literal::Float(f, suffix) => {
                 w!(self, "{}", f);
                 if let Some(suffix) = suffix {

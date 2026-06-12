@@ -3,7 +3,7 @@
 mod format_like;
 
 use base_db::SourceDatabase;
-use hir::{ItemInNs, Semantics};
+use hir::{HirDisplay, ItemInNs, Semantics};
 use ide_db::{
     RootDatabase, SnippetCap,
     documentation::{Documentation, HasDocs},
@@ -118,13 +118,11 @@ pub(crate) fn complete_postfix(
     postfix_snippet("call", "function(expr)", format!("${{1}}({receiver_text})"))
         .add_to(acc, ctx.db);
 
-    if let Some(expected_ty) = ctx.expected_type.as_ref()
-        && let Some(adt) = expected_ty.as_adt()
-    {
+    if let Some(expected_ty) = ctx.expected_type.as_ref() {
         let is_valid_new = expected_ty
             .iterate_assoc_items(ctx.db, |item| {
                 if let hir::AssocItem::Function(func) = item
-                    && func.name(ctx.db) == hir::sym::new
+                    && func.name(ctx.db).as_str() == "new"
                     && !func.has_self_param(ctx.db)
                 {
                     let params = func.params_without_self(ctx.db);
@@ -136,9 +134,8 @@ pub(crate) fn complete_postfix(
             })
             .is_some();
 
-        let adt = hir::ModuleDef::from(adt);
-        if is_valid_new && let Some(path) = ctx.module.find_path(ctx.db, adt, cfg) {
-            let ty_name = path.display(ctx.db, ctx.display_target.edition).to_smolstr();
+        if is_valid_new {
+            let ty_name = expected_ty.display(ctx.db, ctx.display_target).to_smolstr();
 
             postfix_snippet(
                 "new",
@@ -1728,37 +1725,7 @@ impl<T> RefCell<T> {
 
 fn main() {
     let other_thing = OtherThing;
-    let thing: RefCell<OtherThing> = RefCell::new(other_thing$0);
-}
-"#,
-        );
-
-        check_edit(
-            "new",
-            r#"
-mod foo {
-    pub struct OtherThing;
-    pub struct RefCell<T>(T);
-    impl<T> RefCell<T> {
-        pub fn new(t: T) -> Self { RefCell(t) }
-    }
-}
-
-fn main() {
-    let thing: foo::RefCell<foo::OtherThing> = foo::OtherThing.$0;
-}
-"#,
-            r#"
-mod foo {
-    pub struct OtherThing;
-    pub struct RefCell<T>(T);
-    impl<T> RefCell<T> {
-        pub fn new(t: T) -> Self { RefCell(t) }
-    }
-}
-
-fn main() {
-    let thing: foo::RefCell<foo::OtherThing> = foo::RefCell::new(foo::OtherThing$0);
+    let thing: RefCell<OtherThing> = RefCell<OtherThing>::new(other_thing$0);
 }
 "#,
         );

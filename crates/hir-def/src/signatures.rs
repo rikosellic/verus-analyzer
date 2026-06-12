@@ -582,7 +582,7 @@ impl TraitSignature {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
-    pub struct FnFlags: u16 {
+    pub struct FnFlags: u32 {
         const HAS_BODY = 1 << 1;
         const DEFAULT = 1 << 2;
         const CONST = 1 << 3;
@@ -601,6 +601,11 @@ bitflags! {
         const EXPLICIT_SAFE = 1 << 12;
         const HAS_LEGACY_CONST_GENERICS = 1 << 13;
         const RUSTC_INTRINSIC = 1 << 14;
+        const VERUS_SPEC = 1 << 15;
+        const VERUS_PROOF = 1 << 16;
+        const VERUS_AXIOM = 1 << 17;
+        const VERUS_SPEC_OPEN = 1 << 18;
+        const VERUS_SPEC_CLOSED = 1 << 19;
     }
 }
 
@@ -670,6 +675,24 @@ impl FunctionSignature {
         }
         if source.value.safe_token().is_some() {
             flags.insert(FnFlags::EXPLICIT_SAFE);
+        }
+        if let Some(fn_mode) = source.value.fn_mode() {
+            if fn_mode.spec_token().is_some() {
+                flags.insert(FnFlags::VERUS_SPEC);
+            } else if fn_mode.proof_token().is_some() {
+                flags.insert(FnFlags::VERUS_PROOF);
+            } else if fn_mode.axiom_token().is_some() {
+                flags.insert(FnFlags::VERUS_AXIOM);
+            }
+        }
+        if flags.contains(FnFlags::VERUS_SPEC) {
+            if let Some(publish) = source.value.publish() {
+                if publish.open_token().is_some() {
+                    flags.insert(FnFlags::VERUS_SPEC_OPEN);
+                } else if publish.closed_token().is_some() {
+                    flags.insert(FnFlags::VERUS_SPEC_CLOSED);
+                }
+            }
         }
         if source.value.body().is_some() {
             flags.insert(FnFlags::HAS_BODY);
@@ -753,6 +776,26 @@ impl FunctionSignature {
 
     pub fn is_safe(&self) -> bool {
         self.flags.contains(FnFlags::EXPLICIT_SAFE)
+    }
+
+    pub fn is_spec(&self) -> bool {
+        self.flags.contains(FnFlags::VERUS_SPEC)
+    }
+
+    pub fn is_proof(&self) -> bool {
+        self.flags.contains(FnFlags::VERUS_PROOF)
+    }
+
+    pub fn is_axiom(&self) -> bool {
+        self.flags.contains(FnFlags::VERUS_AXIOM)
+    }
+
+    pub fn is_open_spec(&self) -> bool {
+        self.flags.contains(FnFlags::VERUS_SPEC_OPEN)
+    }
+
+    pub fn is_closed_spec(&self) -> bool {
+        self.flags.contains(FnFlags::VERUS_SPEC_CLOSED)
     }
 
     pub fn is_varargs(&self) -> bool {

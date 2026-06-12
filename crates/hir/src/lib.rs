@@ -49,11 +49,11 @@ use arrayvec::ArrayVec;
 use base_db::{CrateDisplayName, CrateOrigin, LangCrateOrigin, SourceDatabase, all_crates};
 use either::Either;
 use hir_def::{
-    AdtId, AssocItemId, AssocItemLoc, BuiltinDeriveImplId, CallableDefId, ConstId, ConstParamId,
-    DefWithBodyId, EnumId, EnumVariantId, ExpressionStoreOwnerId, ExternBlockId, ExternCrateId,
-    FunctionId, GenericDefId, HasModule, ImplId, ItemContainerId, LifetimeParamId, LocalFieldId,
-    Lookup, MacroExpander, MacroId, StaticId, StructId, SyntheticSyntax, TupleId, TypeAliasId,
-    TypeOrConstParamId, TypeParamId, UnionId,
+    AdtId, AssocItemId, AssocItemLoc, BroadcastGroupId, BuiltinDeriveImplId, CallableDefId,
+    ConstId, ConstParamId, DefWithBodyId, EnumId, EnumVariantId, ExpressionStoreOwnerId,
+    ExternBlockId, ExternCrateId, FunctionId, GenericDefId, HasModule, ImplId, ItemContainerId,
+    LifetimeParamId, LocalFieldId, Lookup, MacroExpander, MacroId, StaticId, StructId,
+    SyntheticSyntax, TupleId, TypeAliasId, TypeOrConstParamId, TypeParamId, UnionId,
     attrs::AttrFlags,
     builtin_derive::BuiltinDeriveImplMethod,
     expr_store::{ExpressionStore, ExpressionStoreDiagnostics, ExpressionStoreSourceMap},
@@ -401,6 +401,7 @@ pub enum ModuleDef {
     TypeAlias(TypeAlias),
     BuiltinType(BuiltinType),
     Macro(Macro),
+    BroadcastGroup(BroadcastGroup),
 }
 impl_from!(
     Module,
@@ -412,7 +413,8 @@ impl_from!(
     Trait,
     TypeAlias,
     BuiltinType,
-    Macro
+    Macro,
+    BroadcastGroup
     for ModuleDef
 );
 
@@ -433,6 +435,7 @@ impl ModuleDef {
             ModuleDef::Trait(it) => Some(it.module(db)),
             ModuleDef::TypeAlias(it) => Some(it.module(db)),
             ModuleDef::Macro(it) => Some(it.module(db)),
+            ModuleDef::BroadcastGroup(it) => Some(it.module(db)),
             ModuleDef::BuiltinType(_) => None,
         }
     }
@@ -461,6 +464,7 @@ impl ModuleDef {
             ModuleDef::TypeAlias(it) => it.name(db),
             ModuleDef::Static(it) => it.name(db),
             ModuleDef::Macro(it) => it.name(db),
+            ModuleDef::BroadcastGroup(it) => it.name(db)?,
             ModuleDef::BuiltinType(it) => it.name(),
         };
         Some(name)
@@ -487,7 +491,9 @@ impl ModuleDef {
             ModuleDef::Const(it) => it.id.into(),
             ModuleDef::Static(it) => it.id.into(),
             ModuleDef::EnumVariant(it) => it.id.into(),
-            ModuleDef::BuiltinType(_) | ModuleDef::Macro(_) => return Vec::new(),
+            ModuleDef::BuiltinType(_) | ModuleDef::Macro(_) | ModuleDef::BroadcastGroup(_) => {
+                return Vec::new();
+            }
         };
 
         let mut acc = Vec::new();
@@ -522,6 +528,7 @@ impl ModuleDef {
             | ModuleDef::Trait(_)
             | ModuleDef::TypeAlias(_)
             | ModuleDef::Macro(_)
+            | ModuleDef::BroadcastGroup(_)
             | ModuleDef::BuiltinType(_) => None,
         }
     }
@@ -538,6 +545,7 @@ impl ModuleDef {
             | ModuleDef::Static(_)
             | ModuleDef::Const(_)
             | ModuleDef::BuiltinType(_)
+            | ModuleDef::BroadcastGroup(_)
             | ModuleDef::Macro(_) => None,
         }
     }
@@ -553,6 +561,7 @@ impl ModuleDef {
             ModuleDef::EnumVariant(_)
             | ModuleDef::Module(_)
             | ModuleDef::BuiltinType(_)
+            | ModuleDef::BroadcastGroup(_)
             | ModuleDef::Macro(_) => None,
         }
     }
@@ -568,6 +577,7 @@ impl ModuleDef {
             ModuleDef::Trait(it) => it.attrs(db),
             ModuleDef::TypeAlias(it) => it.attrs(db),
             ModuleDef::Macro(it) => it.attrs(db),
+            ModuleDef::BroadcastGroup(_) => return None,
             ModuleDef::BuiltinType(_) => return None,
         })
     }
@@ -594,6 +604,7 @@ impl HasAttrs for ModuleDef {
             ModuleDef::Trait(it) => it.attr_id(db),
             ModuleDef::TypeAlias(it) => it.attr_id(db),
             ModuleDef::Macro(it) => it.attr_id(db),
+            ModuleDef::BroadcastGroup(_) => attrs::AttrsOwner::Dummy,
             ModuleDef::BuiltinType(_) => attrs::AttrsOwner::Dummy,
         }
     }
@@ -611,6 +622,7 @@ impl HasVisibility for ModuleDef {
             ModuleDef::TypeAlias(it) => it.visibility(db),
             ModuleDef::EnumVariant(it) => it.visibility(db),
             ModuleDef::Macro(it) => it.visibility(db),
+            ModuleDef::BroadcastGroup(it) => it.visibility(db),
             ModuleDef::BuiltinType(_) => Visibility::Public,
         }
     }
@@ -953,6 +965,7 @@ impl Module {
                     AssocItemId::FunctionId(it) => !FunctionSignature::of(db, it).has_body(),
                     AssocItemId::ConstId(id) => !ConstSignature::of(db, id).has_body(),
                     AssocItemId::TypeAliasId(it) => TypeAliasSignature::of(db, it).ty.is_none(),
+                    AssocItemId::BroadcastGroupId(_) => true,
                 });
                 impl_assoc_items_scratch.extend(impl_id.impl_items(db).items.iter().cloned());
 
@@ -1011,6 +1024,7 @@ impl Module {
                                 },
                                 AssocItem::Const(it) => it.id.into(),
                                 AssocItem::TypeAlias(it) => it.id.into(),
+                                AssocItem::BroadcastGroup(_) => return false,
                             };
                             !hir_ty::dyn_compatibility::generics_require_sized_self(db, assoc_item)
                         });
@@ -3182,6 +3196,34 @@ impl ExternBlock {
     }
 }
 
+/// Verus: a named `broadcast group { ... }` declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BroadcastGroup {
+    pub(crate) id: BroadcastGroupId,
+}
+
+impl BroadcastGroup {
+    pub fn module(self, db: &dyn HirDatabase) -> Module {
+        Module { id: self.id.module(db) }
+    }
+
+    pub fn name(self, db: &dyn HirDatabase) -> Option<Name> {
+        let loc = self.id.lookup(db);
+        let source = loc.source(db);
+        source
+            .value
+            .broadcast_group_identifier()?
+            .ident_token()
+            .map(|tok| Name::new_root(tok.text()))
+    }
+}
+
+impl HasVisibility for BroadcastGroup {
+    fn visibility(&self, db: &dyn HirDatabase) -> Visibility {
+        AssocItemId::from(self.id).assoc_visibility(db)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StaticLifetime;
 
@@ -3473,21 +3515,23 @@ impl From<Macro> for ItemInNs {
     }
 }
 
-impl_from!(
-    ModuleDef {
-        Module => Types,
-        Function => Values,
-        Adt => Types,
-        EnumVariant => Types,
-        Const => Values,
-        Static => Values,
-        Trait => Types,
-        TypeAlias => Types,
-        BuiltinType => Types,
-        Macro => Macros,
+impl From<ModuleDef> for ItemInNs {
+    fn from(module_def: ModuleDef) -> Self {
+        match module_def {
+            ModuleDef::Function(_) | ModuleDef::Const(_) | ModuleDef::Static(_) => {
+                ItemInNs::Values(module_def)
+            }
+            ModuleDef::Macro(it) => ItemInNs::Macros(it),
+            ModuleDef::Module(_)
+            | ModuleDef::Adt(_)
+            | ModuleDef::EnumVariant(_)
+            | ModuleDef::Trait(_)
+            | ModuleDef::TypeAlias(_)
+            | ModuleDef::BuiltinType(_)
+            | ModuleDef::BroadcastGroup(_) => ItemInNs::Types(module_def),
+        }
     }
-    for ItemInNs
-);
+}
 
 impl ItemInNs {
     pub fn into_module_def(self) -> ModuleDef {
@@ -3554,6 +3598,8 @@ pub enum AssocItem {
     Function(Function),
     Const(Const),
     TypeAlias(TypeAlias),
+    // verus: broadcast group can appear in impl blocks
+    BroadcastGroup(BroadcastGroup),
 }
 
 impl From<method_resolution::CandidateId> for AssocItem {
@@ -3596,12 +3642,19 @@ impl AsAssocItem for TypeAlias {
     }
 }
 
+impl AsAssocItem for BroadcastGroup {
+    fn as_assoc_item(self, db: &dyn HirDatabase) -> Option<AssocItem> {
+        as_assoc_item(db, AssocItem::BroadcastGroup, self.id)
+    }
+}
+
 impl AsAssocItem for ModuleDef {
     fn as_assoc_item(self, db: &dyn HirDatabase) -> Option<AssocItem> {
         match self {
             ModuleDef::Function(it) => it.as_assoc_item(db),
             ModuleDef::Const(it) => it.as_assoc_item(db),
             ModuleDef::TypeAlias(it) => it.as_assoc_item(db),
+            ModuleDef::BroadcastGroup(it) => it.as_assoc_item(db),
             _ => None,
         }
     }
@@ -3707,6 +3760,7 @@ impl AssocItem {
             AssocItem::Function(it) => Some(it.name(db)),
             AssocItem::Const(it) => it.name(db),
             AssocItem::TypeAlias(it) => Some(it.name(db)),
+            AssocItem::BroadcastGroup(it) => it.name(db),
         }
     }
 
@@ -3715,6 +3769,7 @@ impl AssocItem {
             AssocItem::Function(f) => f.module(db),
             AssocItem::Const(c) => c.module(db),
             AssocItem::TypeAlias(t) => t.module(db),
+            AssocItem::BroadcastGroup(bg) => bg.module(db),
         }
     }
 
@@ -3730,6 +3785,7 @@ impl AssocItem {
             },
             AssocItem::Const(it) => it.id.lookup(db).container,
             AssocItem::TypeAlias(it) => it.id.lookup(db).container,
+            AssocItem::BroadcastGroup(it) => it.id.lookup(db).container,
         };
         match container {
             ItemContainerId::TraitId(id) => AssocItemContainer::Trait(id.into()),
@@ -3816,6 +3872,7 @@ impl AssocItem {
                     acc.push(diag.into());
                 }
             }
+            AssocItem::BroadcastGroup(_) => {}
         }
     }
 }
@@ -3826,11 +3883,21 @@ impl HasVisibility for AssocItem {
             AssocItem::Function(f) => f.visibility(db),
             AssocItem::Const(c) => c.visibility(db),
             AssocItem::TypeAlias(t) => t.visibility(db),
+            AssocItem::BroadcastGroup(bg) => bg.visibility(db),
         }
     }
 }
 
-impl_from!(AssocItem { Function, Const, TypeAlias } for ModuleDef);
+impl From<AssocItem> for ModuleDef {
+    fn from(assoc: AssocItem) -> Self {
+        match assoc {
+            AssocItem::Function(it) => ModuleDef::Function(it),
+            AssocItem::Const(it) => ModuleDef::Const(it),
+            AssocItem::TypeAlias(it) => ModuleDef::TypeAlias(it),
+            AssocItem::BroadcastGroup(it) => ModuleDef::BroadcastGroup(it),
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum GenericDef {

@@ -54,6 +54,7 @@ pub fn crate_lang_items(db: &dyn SourceDatabase, krate: Crate) -> Option<Box<Lan
                     AssocItemId::FunctionId(f) => lang_items.collect_lang_item(db, f),
                     AssocItemId::TypeAliasId(t) => lang_items.collect_lang_item(db, t),
                     AssocItemId::ConstId(c) => lang_items.collect_lang_item(db, c),
+                    AssocItemId::BroadcastGroupId(_) => (),
                 }
             }
         }
@@ -71,6 +72,7 @@ pub fn crate_lang_items(db: &dyn SourceDatabase, krate: Crate) -> Option<Box<Lan
                                 lang_items.collect_lang_item(db, alias)
                             }
                             AssocItemId::ConstId(c) => lang_items.collect_lang_item(db, c),
+                            AssocItemId::BroadcastGroupId(_) => {}
                         }
                     });
                 }

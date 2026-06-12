@@ -301,6 +301,8 @@ pub enum SymbolKind {
     Union,
     ValueParam,
     Variant,
+    // verus
+    BroadcastGroup,
 }
 
 impl From<hir::MacroKind> for SymbolKind {
@@ -331,6 +333,7 @@ impl SymbolKind {
             hir::ModuleDef::Trait(..) => SymbolKind::Trait,
             hir::ModuleDef::TypeAlias(..) => SymbolKind::TypeAlias,
             hir::ModuleDef::BuiltinType(..) => SymbolKind::TypeAlias,
+            hir::ModuleDef::BroadcastGroup(..) => SymbolKind::BroadcastGroup,
         }
     }
 }

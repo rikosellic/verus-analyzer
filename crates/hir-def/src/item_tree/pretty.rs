@@ -316,6 +316,23 @@ impl Printer<'_> {
                 self.print_visibility(*visibility);
                 wln!(self, "macro {} {{ ... }}", name.display(self.db, self.edition));
             }
+            // verus
+            ModItemId::VerusGlobal(ast_id) => {
+                self.print_ast_id(ast_id.erase());
+                wln!(self, "global ...");
+            }
+            ModItemId::BroadcastGroup(ast_id) => {
+                self.print_ast_id(ast_id.erase());
+                wln!(self, "broadcast group {{ ... }}");
+            }
+            ModItemId::BroadcastUse(ast_id) => {
+                self.print_ast_id(ast_id.erase());
+                wln!(self, "broadcast use ...;");
+            }
+            ModItemId::AssumeSpecification(ast_id) => {
+                self.print_ast_id(ast_id.erase());
+                wln!(self, "assume_specification ...;");
+            }
         }
 
         self.blank();

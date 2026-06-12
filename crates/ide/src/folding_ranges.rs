@@ -18,6 +18,7 @@ pub enum FoldKind {
     Comment,
     Imports,
     Region,
+    ProofBlock,
     Block,
     ArgList,
     Array,
@@ -197,6 +198,13 @@ fn fold_kind(
             FoldKind::TailExpr,
             add_collapsed_text.then(|| collapse_expr(tail_expr)).flatten(),
         ));
+    }
+
+    if element.kind() == BLOCK_EXPR
+        && let Some(block) = element.as_node().and_then(|node| ast::BlockExpr::cast(node.clone()))
+        && matches!(block.modifier(), Some(ast::BlockModifier::Proof(_)))
+    {
+        return Some((FoldKind::ProofBlock, None));
     }
 
     match element.kind() {
@@ -504,6 +512,7 @@ mod tests {
                 FoldKind::Block => "block",
                 FoldKind::ArgList => "arglist",
                 FoldKind::Region => "region",
+                FoldKind::ProofBlock => "proofblock",
                 FoldKind::Consts => "consts",
                 FoldKind::Statics => "statics",
                 FoldKind::TypeAliases => "typealiases",

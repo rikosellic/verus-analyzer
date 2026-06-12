@@ -16,6 +16,7 @@ pub(crate) fn trait_impl_missing_assoc_item(
             hir::AssocItem::Function(_) => "`fn ",
             hir::AssocItem::Const(_) => "`const ",
             hir::AssocItem::TypeAlias(_) => "`type ",
+            hir::AssocItem::BroadcastGroup(_) => "`broadcast_group ",
         })?;
         f(&name.display(ctx.sema.db, ctx.edition))?;
         f(&"`")

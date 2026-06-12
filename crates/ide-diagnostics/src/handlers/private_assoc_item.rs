@@ -23,6 +23,7 @@ pub(crate) fn private_assoc_item(
                 hir::AssocItem::Function(_) => "function",
                 hir::AssocItem::Const(_) => "const",
                 hir::AssocItem::TypeAlias(_) => "type alias",
+                hir::AssocItem::BroadcastGroup(_) => "broadcast group",
             },
             name,
         ),

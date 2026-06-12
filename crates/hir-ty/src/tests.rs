@@ -489,6 +489,8 @@ fn infer_with_mismatches(content: &str, include_mismatches: bool) -> String {
                     AssocItemId::TypeAliasId(it) => {
                         generic_defs.push((it.into(), module.krate(&db)));
                     }
+                    // verus: broadcast groups have no signature.
+                    AssocItemId::BroadcastGroupId(_) => {}
                 }
             }
         }
@@ -575,6 +577,8 @@ pub(crate) fn visit_module(
                 AssocItemId::TypeAliasId(it) => {
                     cb(it.into());
                 }
+                // verus
+                AssocItemId::BroadcastGroupId(_) => {}
             }
         }
     }
@@ -614,6 +618,8 @@ pub(crate) fn visit_module(
                             AssocItemId::FunctionId(it) => cb(it.into()),
                             AssocItemId::ConstId(it) => cb(it.into()),
                             AssocItemId::TypeAliasId(it) => cb(it.into()),
+                            // verus
+                            AssocItemId::BroadcastGroupId(_) => {}
                         }
                     }
                 }

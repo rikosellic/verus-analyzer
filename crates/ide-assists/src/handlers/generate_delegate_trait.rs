@@ -739,6 +739,7 @@ fn process_assoc_item(
             None
         }
         AssocItem::TypeAlias(ta) => ty_assoc_item(ta, qual_path_ty),
+        AssocItem::BroadcastGroup(_) => None,
     }
 }
 

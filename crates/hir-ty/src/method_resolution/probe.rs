@@ -591,6 +591,7 @@ impl<'db> ProbeChoice<'db> for ProbeForNameChoice<'db> {
                     AssocItemId::FunctionId(id) => id.into(),
                     AssocItemId::ConstId(id) => id.into(),
                     AssocItemId::TypeAliasId(_) => return None,
+                    AssocItemId::BroadcastGroupId(_) => return None,
                 };
                 Some((name, id))
             })

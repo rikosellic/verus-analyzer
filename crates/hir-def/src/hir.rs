@@ -201,6 +201,9 @@ pub enum Literal {
     Bool(bool),
     Int(i128, Option<BuiltinInt>),
     Uint(u128, Option<BuiltinUint>),
+    VerusInt(Symbol),
+    VerusNat(Symbol),
+    VerusReal(FloatTypeWrapper),
     // Here we are using a wrapper around float because float primitives do not implement Eq, so they
     // could not be used directly here, to understand how the wrapper works go to definition of
     // FloatTypeWrapper
@@ -216,7 +219,18 @@ pub enum LiteralOrConst {
 
 impl Literal {
     pub fn negate(self) -> Option<Self> {
-        if let Literal::Int(i, k) = self { Some(Literal::Int(-i, k)) } else { None }
+        if let Literal::Int(i, k) = self {
+            Some(Literal::Int(-i, k))
+        } else if let Literal::VerusInt(i) = self {
+            let i = if let Some(i) = i.as_str().strip_prefix('-') {
+                Symbol::intern(i)
+            } else {
+                Symbol::intern(&format!("-{i}"))
+            };
+            Some(Literal::VerusInt(i))
+        } else {
+            None
+        }
     }
 }
 
@@ -225,7 +239,13 @@ impl From<ast::LiteralKind> for Literal {
         use ast::LiteralKind;
         match ast_lit_kind {
             LiteralKind::IntNumber(lit) => {
-                if let builtin @ Some(_) = lit.suffix().and_then(BuiltinFloat::from_suffix) {
+                if lit.suffix() == Some("int") {
+                    Literal::VerusInt(Symbol::intern(&lit.value_string()))
+                } else if lit.suffix() == Some("nat") {
+                    Literal::VerusNat(Symbol::intern(&lit.value_string()))
+                } else if lit.suffix() == Some("real") {
+                    Literal::VerusReal(FloatTypeWrapper::new(Symbol::intern(&lit.value_string())))
+                } else if let builtin @ Some(_) = lit.suffix().and_then(BuiltinFloat::from_suffix) {
                     Literal::Float(
                         FloatTypeWrapper::new(Symbol::intern(&lit.value_string())),
                         builtin,
@@ -238,8 +258,12 @@ impl From<ast::LiteralKind> for Literal {
                 }
             }
             LiteralKind::FloatNumber(lit) => {
-                let ty = lit.suffix().and_then(BuiltinFloat::from_suffix);
-                Literal::Float(FloatTypeWrapper::new(Symbol::intern(&lit.value_string())), ty)
+                if lit.suffix() == Some("real") {
+                    Literal::VerusReal(FloatTypeWrapper::new(Symbol::intern(&lit.value_string())))
+                } else {
+                    let ty = lit.suffix().and_then(BuiltinFloat::from_suffix);
+                    Literal::Float(FloatTypeWrapper::new(Symbol::intern(&lit.value_string())), ty)
+                }
             }
             LiteralKind::ByteString(bs) => {
                 let text = bs.value().map_or_else(|_| Default::default(), Box::from);
@@ -273,6 +297,58 @@ pub enum RecordSpread {
 pub enum Expr {
     /// This is produced if the syntax tree does not have a required expression piece.
     Missing,
+
+    // verus
+    Assert {
+        condition: ExprId,
+        body: Option<ExprId>,
+    },
+    Assume {
+        condition: ExprId,
+    },
+    Final {
+        expr: ExprId,
+    },
+    View {
+        condition: ExprId,
+    },
+    IsExpr {
+        expr: ExprId,
+        type_ref: TypeRefId,
+    },
+    HasExpr {
+        expr_collection: ExprId,
+        expr_elt: ExprId,
+    },
+    ArrowExpr {
+        expr: ExprId,
+        name: Name,
+    },
+    MatchesExpr {
+        expr: ExprId,
+        pat: PatId,
+    },
+    /// `assert <closure> [implies <expr>] by <block>` quantified assertion.
+    /// The `closure` carries the bound parameters and the assertion body
+    /// (i.e. `forall |x| P`); `implies` is the optional consequent in
+    /// `forall |x| P implies Q`; `body` is the optional `by { .. }` proof.
+    AssertForall {
+        closure: ExprId,
+        implies: Option<ExprId>,
+        body: Option<ExprId>,
+    },
+    Quantifier {
+        kind: QuantifierKind,
+        args: Box<[PatId]>,
+        arg_types: Box<[Option<TypeRefId>]>,
+        body: ExprId,
+    },
+    ProofBlock {
+        id: Option<BlockId>,
+        statements: Box<[Statement]>,
+        tail: Option<ExprId>,
+    },
+
     Path(Path),
     If {
         condition: ExprId,
@@ -413,6 +489,7 @@ impl Expr {
             | Expr::InlineAsm(_)
             | Expr::Block { .. }
             | Expr::Unsafe { .. }
+            | Expr::ProofBlock { .. }
             | Expr::Const(_)
             | Expr::If { .. }
             | Expr::Literal(_)
@@ -430,11 +507,24 @@ impl Expr {
             | Expr::Call { .. }
             | Expr::Field { .. }
             | Expr::Index { .. }
-            | Expr::MethodCall { .. } => ExprPrecedence::Postfix,
+            | Expr::MethodCall { .. }
+            // verus
+            | Expr::ArrowExpr { .. }
+            | Expr::IsExpr { .. }
+            | Expr::HasExpr { .. }
+            | Expr::MatchesExpr { .. }
+            | Expr::View { .. } => ExprPrecedence::Postfix,
 
             Expr::Box { .. } | Expr::Let { .. } | Expr::UnaryOp { .. } | Expr::Ref { .. } => {
                 ExprPrecedence::Prefix
             }
+
+            // verus
+            Expr::Assert { .. }
+            | Expr::AssertForall { .. }
+            | Expr::Quantifier { .. }
+            | Expr::Assume { .. }
+            | Expr::Final { .. } => ExprPrecedence::Unambiguous,
 
             Expr::Cast { .. } => ExprPrecedence::Cast,
 
@@ -442,6 +532,10 @@ impl Expr {
                 None => ExprPrecedence::Unambiguous,
                 Some(BinaryOp::LogicOp(LogicOp::Or)) => ExprPrecedence::LOr,
                 Some(BinaryOp::LogicOp(LogicOp::And)) => ExprPrecedence::LAnd,
+                // Verus
+                Some(BinaryOp::LogicOp(LogicOp::Imply))
+                | Some(BinaryOp::LogicOp(LogicOp::RevImply))
+                | Some(BinaryOp::LogicOp(LogicOp::Iff)) => ExprPrecedence::LOr,
                 Some(BinaryOp::CmpOp(_)) => ExprPrecedence::Compare,
                 Some(BinaryOp::Assignment { .. }) => ExprPrecedence::Assign,
                 Some(BinaryOp::ArithOp(arith_op)) => match arith_op {
@@ -631,6 +725,13 @@ pub enum ClosureKind {
     CoroutineClosure(CoroutineKind),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QuantifierKind {
+    Forall,
+    Exists,
+    Choose,
+}
+
 /// In the case of a coroutine created as part of an async/gen construct,
 /// which kind of async/gen construct caused it to be created?
 ///
@@ -688,6 +789,7 @@ pub enum Statement {
         type_ref: Option<TypeRefId>,
         initializer: Option<ExprId>,
         else_branch: Option<ExprId>,
+        is_verus_spec_mode: bool,
     },
     Expr {
         expr: ExprId,

@@ -97,6 +97,7 @@ pub(crate) fn complete_expr_path<'db>(
         hir::AssocItem::Function(func) => acc.add_function(ctx, path_ctx, func, None),
         hir::AssocItem::Const(ct) => acc.add_const(ctx, ct),
         hir::AssocItem::TypeAlias(ty) => acc.add_type_alias(ctx, ty),
+        hir::AssocItem::BroadcastGroup(_) => {}
     };
 
     match qualified {

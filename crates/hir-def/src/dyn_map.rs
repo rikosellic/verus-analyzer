@@ -33,9 +33,10 @@ pub mod keys {
     use syntax::{AstNode, AstPtr, ast};
 
     use crate::{
-        BlockId, BuiltinDeriveImplId, ConstId, EnumId, EnumVariantId, ExternBlockId, ExternCrateId,
-        FieldId, FunctionId, ImplId, LifetimeParamId, Macro2Id, MacroRulesId, ProcMacroId,
-        StaticId, StructId, TraitId, TypeAliasId, TypeOrConstParamId, UnionId, UseId,
+        BlockId, BroadcastGroupId, BuiltinDeriveImplId, ConstId, EnumId, EnumVariantId,
+        ExternBlockId, ExternCrateId, FieldId, FunctionId, ImplId, LifetimeParamId, Macro2Id,
+        MacroRulesId, ProcMacroId, StaticId, StructId, TraitId, TypeAliasId, TypeOrConstParamId,
+        UnionId, UseId,
         dyn_map::{DynMap, Policy},
     };
 
@@ -46,6 +47,8 @@ pub mod keys {
     pub const CONST: Key<ast::Const, ConstId> = Key::new();
     pub const STATIC: Key<ast::Static, StaticId> = Key::new();
     pub const TYPE_ALIAS: Key<ast::TypeAlias, TypeAliasId> = Key::new();
+    // verus: a `broadcast group` (whether at module level or inside an impl/trait).
+    pub const BROADCAST_GROUP: Key<ast::BroadcastGroup, BroadcastGroupId> = Key::new();
     pub const IMPL: Key<ast::Impl, ImplId> = Key::new();
     pub const EXTERN_BLOCK: Key<ast::ExternBlock, ExternBlockId> = Key::new();
     pub const TRAIT: Key<ast::Trait, TraitId> = Key::new();

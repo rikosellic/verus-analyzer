@@ -632,7 +632,8 @@ impl<'a, 'db, D: Delegate<'db>> ExprUseVisitor<'a, 'db, D> {
             }
 
             Expr::Block { ref statements, tail, .. }
-            | Expr::Unsafe { ref statements, tail, .. } => {
+            | Expr::Unsafe { ref statements, tail, .. }
+            | Expr::ProofBlock { ref statements, tail, .. } => {
                 for stmt in statements {
                     self.walk_stmt(stmt)?;
                 }
@@ -694,6 +695,38 @@ impl<'a, 'db, D: Delegate<'db>> ExprUseVisitor<'a, 'db, D> {
             }
 
             Expr::IncludeBytes => {}
+            // verus
+            Expr::Assert { condition, body } => {
+                self.consume_expr(condition)?;
+                if let Some(b) = body {
+                    self.consume_expr(b)?;
+                }
+            }
+            Expr::AssertForall { closure, implies, body } => {
+                self.consume_expr(closure)?;
+                if let Some(i) = implies {
+                    self.consume_expr(i)?;
+                }
+                if let Some(b) = body {
+                    self.consume_expr(b)?;
+                }
+            }
+            Expr::Quantifier { body, .. } => {
+                self.consume_expr(body)?;
+            }
+            Expr::Assume { condition } | Expr::View { condition } => {
+                self.consume_expr(condition)?;
+            }
+            Expr::Final { expr }
+            | Expr::IsExpr { expr, .. }
+            | Expr::ArrowExpr { expr, .. }
+            | Expr::MatchesExpr { expr, .. } => {
+                self.consume_expr(expr)?;
+            }
+            Expr::HasExpr { expr_collection, expr_elt } => {
+                self.consume_expr(expr_collection)?;
+                self.consume_expr(expr_elt)?;
+            }
         }
         Ok(())
     }

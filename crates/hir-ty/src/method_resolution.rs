@@ -478,6 +478,7 @@ fn lookup_impl_assoc_item_for_trait_ref<'db>(
             AssocItemId::FunctionId(f) => (n == name).then_some(AssocItemId::FunctionId(f)),
             AssocItemId::ConstId(c) => (n == name).then_some(AssocItemId::ConstId(c)),
             AssocItemId::TypeAliasId(_) => None,
+            AssocItemId::BroadcastGroupId(_) => None,
         })?;
     Some((Either::Left(item), impl_subst))
 }

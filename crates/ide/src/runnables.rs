@@ -161,12 +161,17 @@ pub(crate) fn runnables(db: &RootDatabase, file_id: FileId) -> Vec<Runnable> {
         add_opt(runnable.or_else(|| module_def_doctest(&sema, def)), Some(def));
         if let Definition::SelfType(impl_) = def {
             impl_.items(db).into_iter().for_each(|assoc| {
+                // verus: broadcast groups have no Definition mapping yet
+                if matches!(assoc, hir::AssocItem::BroadcastGroup(_)) {
+                    return;
+                }
                 let runnable = match assoc {
                     hir::AssocItem::Function(it) => {
                         runnable_fn(&sema, it).or_else(|| module_def_doctest(&sema, it.into()))
                     }
                     hir::AssocItem::Const(it) => module_def_doctest(&sema, it.into()),
                     hir::AssocItem::TypeAlias(it) => module_def_doctest(&sema, it.into()),
+                    hir::AssocItem::BroadcastGroup(_) => None,
                 };
                 add_opt(runnable, Some(assoc.into()))
             });

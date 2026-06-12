@@ -580,6 +580,7 @@ fn filter_by_definition_kind(
         ModuleDef::Trait(_) => allowed.type_namespace,
         ModuleDef::TypeAlias(_) => allowed.type_namespace,
         ModuleDef::BuiltinType(_) => allowed.type_namespace,
+        ModuleDef::BroadcastGroup(_) => allowed.type_namespace,
         ModuleDef::Macro(item) => {
             if item.is_fn_like(db) {
                 allowed.bang_macros
@@ -940,6 +941,9 @@ fn assoc_to_item(assoc: AssocItem) -> ItemInNs {
         AssocItem::Function(f) => ItemInNs::from(ModuleDef::from(f)),
         AssocItem::Const(c) => ItemInNs::from(ModuleDef::from(c)),
         AssocItem::TypeAlias(t) => ItemInNs::from(ModuleDef::from(t)),
+        AssocItem::BroadcastGroup(_) => {
+            unreachable!("BroadcastGroup cannot be converted to ItemInNs")
+        }
     }
 }
 

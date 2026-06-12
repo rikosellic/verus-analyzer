@@ -20,8 +20,8 @@ use syntax::{
 use thin_vec::ThinVec;
 
 use crate::{
-    AssocItemId, AstIdWithPath, ConstLoc, FunctionId, FunctionLoc, ImplId, ItemContainerId,
-    ItemLoc, MacroCallId, ModuleId, TraitId, TypeAliasId, TypeAliasLoc,
+    AssocItemId, AstIdWithPath, BroadcastGroupLoc, ConstLoc, FunctionId, FunctionLoc, ImplId,
+    ItemContainerId, ItemLoc, MacroCallId, ModuleId, TraitId, TypeAliasId, TypeAliasLoc,
     item_tree::AttrsOrCfg,
     macro_call_as_call_id,
     nameres::{
@@ -94,6 +94,8 @@ impl TraitItems {
             AssocItemId::FunctionId(_) if item_name == name => Some(item),
             AssocItemId::TypeAliasId(_) if item_name == name => Some(item),
             AssocItemId::ConstId(_) if item_name == name => Some(item),
+            // verus: broadcast groups are name-resolvable as associated items.
+            AssocItemId::BroadcastGroupId(_) if item_name == name => Some(item),
             _ => None,
         })
     }
@@ -346,6 +348,24 @@ impl<'db> AssocItemCollector<'db> {
                         ));
                     }
                 }
+            }
+            // Verus: a `broadcast group` inside an impl/trait names a group of
+            // broadcast lemmas. We intern it so that `Type::group_name` can
+            // resolve via the normal associated-item path-resolution machinery.
+            ast::AssocItem::BroadcastGroup(group) => {
+                let Some(name_tok) =
+                    group.broadcast_group_identifier().and_then(|i| i.ident_token())
+                else {
+                    return;
+                };
+                let name = Name::new_root(name_tok.text());
+                let ast_id = self.ast_id_map.ast_id(&group);
+                let def = BroadcastGroupLoc {
+                    container: self.container,
+                    id: InFile::new(self.file_id, ast_id),
+                }
+                .intern(self.db);
+                self.items.push((name, def.into()));
             }
         }
     }

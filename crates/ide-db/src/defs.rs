@@ -13,8 +13,8 @@ use crate::famous_defs::FamousDefs;
 use arrayvec::ArrayVec;
 use either::Either;
 use hir::{
-    Adt, AsAssocItem, AsExternAssocItem, AssocItem, AttributeTemplate, BuiltinAttr, BuiltinType,
-    Const, Crate, DefWithBody, DeriveHelper, DisplayTarget, DocLinkDef, EnumVariant,
+    Adt, AsAssocItem, AsExternAssocItem, AssocItem, AttributeTemplate, BroadcastGroup, BuiltinAttr,
+    BuiltinType, Const, Crate, DefWithBody, DeriveHelper, DisplayTarget, DocLinkDef, EnumVariant,
     ExpressionStoreOwner, ExternAssocItem, ExternCrateDecl, Field, Function, GenericDef,
     GenericParam, GenericSubstitution, HasContainer, HasVisibility, HirDisplay, Impl,
     InlineAsmOperand, ItemContainer, Label, Local, Macro, Module, ModuleDef, Name, PathResolution,
@@ -56,6 +56,8 @@ pub enum Definition<'db> {
     ExternCrateDecl(ExternCrateDecl),
     InlineAsmRegOrRegClass(()),
     InlineAsmOperand(InlineAsmOperand),
+    // verus: a named `broadcast group { ... }` declaration
+    BroadcastGroup(BroadcastGroup),
 }
 
 impl<'db> Definition<'db> {
@@ -95,6 +97,7 @@ impl<'db> Definition<'db> {
             Definition::DeriveHelper(it) => it.derive().module(db),
             Definition::InlineAsmOperand(it) => it.parent(db).module(db),
             Definition::ToolModule(t) => t.krate().root_module(db),
+            Definition::BroadcastGroup(it) => it.module(db),
             Definition::BuiltinAttr(_)
             | Definition::BuiltinType(_)
             | Definition::BuiltinLifetime(_)
@@ -132,6 +135,10 @@ impl<'db> Definition<'db> {
             Definition::ExternCrateDecl(it) => container_to_definition(it.container(db)),
             Definition::DeriveHelper(it) => Some(it.derive().module(db).into()),
             Definition::InlineAsmOperand(it) => it.parent(db).try_into().ok(),
+            Definition::BroadcastGroup(it) => match AssocItem::BroadcastGroup(*it).container(db) {
+                hir::AssocItemContainer::Trait(t) => Some(t.into()),
+                hir::AssocItemContainer::Impl(i) => Some(i.into()),
+            },
             Definition::BuiltinAttr(_)
             | Definition::BuiltinType(_)
             | Definition::BuiltinLifetime(_)
@@ -155,6 +162,7 @@ impl<'db> Definition<'db> {
             Definition::EnumVariant(it) => it.visibility(db),
             Definition::ExternCrateDecl(it) => it.visibility(db),
             Definition::Macro(it) => it.visibility(db),
+            Definition::BroadcastGroup(it) => it.visibility(db),
             Definition::BuiltinType(_) | Definition::TupleField(_) => Visibility::Public,
             Definition::BuiltinAttr(_)
             | Definition::BuiltinLifetime(_)
@@ -198,6 +206,7 @@ impl<'db> Definition<'db> {
             Definition::ExternCrateDecl(it) => return it.alias_or_name(db),
             Definition::InlineAsmRegOrRegClass(_) => return None,
             Definition::InlineAsmOperand(op) => return op.name(db),
+            Definition::BroadcastGroup(it) => return it.name(db),
         };
         Some(name)
     }
@@ -293,6 +302,7 @@ impl<'db> Definition<'db> {
             Definition::DeriveHelper(_) => None,
             Definition::TupleField(_) => None,
             Definition::InlineAsmRegOrRegClass(_) | Definition::InlineAsmOperand(_) => None,
+            Definition::BroadcastGroup(_) => None,
         };
 
         docs.or_else(|| {
@@ -364,6 +374,12 @@ impl<'db> Definition<'db> {
             // FIXME
             Definition::InlineAsmRegOrRegClass(_) => "inline_asm_reg_or_reg_class".to_owned(),
             Definition::InlineAsmOperand(_) => "inline_asm_reg_operand".to_owned(),
+            Definition::BroadcastGroup(it) => match it.name(db) {
+                Some(name) => {
+                    format!("broadcast group {}", name.display(db, display_target.edition))
+                }
+                None => "broadcast group".to_owned(),
+            },
         }
     }
 }
@@ -909,7 +925,8 @@ impl_from!(
     Label,
     Macro,
     ExternCrateDecl,
-    InlineAsmOperand
+    InlineAsmOperand,
+    BroadcastGroup
     for Definition<'db>
 );
 
@@ -931,6 +948,7 @@ impl AsAssocItem for Definition<'_> {
             Definition::Function(it) => it.as_assoc_item(db),
             Definition::Const(it) => it.as_assoc_item(db),
             Definition::TypeAlias(it) => it.as_assoc_item(db),
+            Definition::BroadcastGroup(it) => it.as_assoc_item(db),
             _ => None,
         }
     }
@@ -953,6 +971,7 @@ impl<'db> From<AssocItem> for Definition<'db> {
             AssocItem::Function(it) => Definition::Function(it),
             AssocItem::Const(it) => Definition::Const(it),
             AssocItem::TypeAlias(it) => Definition::TypeAlias(it),
+            AssocItem::BroadcastGroup(it) => Definition::BroadcastGroup(it),
         }
     }
 }
@@ -985,6 +1004,7 @@ impl<'db> From<ModuleDef> for Definition<'db> {
             ModuleDef::TypeAlias(it) => Definition::TypeAlias(it),
             ModuleDef::Macro(it) => Definition::Macro(it),
             ModuleDef::BuiltinType(it) => Definition::BuiltinType(it),
+            ModuleDef::BroadcastGroup(it) => Definition::BroadcastGroup(it),
         }
     }
 }

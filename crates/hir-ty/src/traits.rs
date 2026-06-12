@@ -320,6 +320,8 @@ pub fn is_inherent_impl_coherent(db: &dyn HirDatabase, def_map: &DefMap, impl_id
                 AssocItemId::TypeAliasId(it) => TypeAliasSignature::of(db, it)
                     .flags
                     .contains(TypeAliasFlags::RUSTC_ALLOW_INCOHERENT_IMPL),
+                // verus: BroadcastGroup doesn't use the incoherent impl attribute
+                AssocItemId::BroadcastGroupId(_) => false,
             })
     }
 }

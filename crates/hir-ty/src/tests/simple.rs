@@ -4307,6 +4307,487 @@ enum Enum {
 }
 
 #[test]
+fn verus_infer_arrow_enum_fields() {
+    check_no_mismatches(
+        r#"
+enum Sum<L, R> {
+    Left(L),
+    Right(R),
+}
+
+impl<L, R> Sum<L, R> {
+    spec fn left(self) -> L {
+        self->Left_0
+    }
+
+    spec fn right(self) -> R {
+        self->Right_0
+    }
+}
+
+enum Beverage {
+    Coffee { creamers: i32, sugar: bool },
+    Soda { flavor: Syrup },
+    Water { ice: bool },
+}
+
+enum Syrup {
+    Cola,
+    RootBeer,
+    Orange,
+    LemonLime,
+}
+
+spec fn sufficiently_creamy(bev: Beverage) -> bool {
+    bev->creamers >= 2
+}
+
+enum Life {
+    Mammal { legs: i32, has_pocket: bool },
+    Arthropod { legs: i32, wings: i32 },
+    Plant { leaves: i32 },
+}
+
+spec fn is_insect(l: Life) -> bool {
+    l->Arthropod_legs == 6
+}
+
+enum Shape {
+    Circle(i32),
+    Rect(i32, i32),
+}
+
+spec fn rect_height(s: Shape) -> i32 {
+    s->1
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_integer_comparisons() {
+    check_no_mismatches(
+        r#"
+struct int;
+struct nat;
+
+spec fn compare(i: int, n: nat, s: isize, u: usize, b: u8) -> bool {
+    i < n
+        && n <= i
+        && i >= s
+        && s > i
+        && n <= u
+        && u >= n
+        && b < n
+        && b <= u
+        && 0 <= n
+        && i < 10
+        && i == n
+        && n != u
+        && 0 == i
+        && n != 10
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_builtin_integer_comparison_with_const_generic() {
+    check_no_mismatches(
+        r#"
+//- minicore: ord
+pub open spec fn test_const_generic_comparison<const N: usize>() -> bool {
+    if 1u8 < N {
+        true
+    } else {
+        false
+    }
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_chained_integer_comparisons() {
+    check_no_mismatches(
+        r#"
+struct int;
+struct nat;
+
+spec fn spec_compare(i: int, n: nat, u: usize) -> bool {
+    u < i <= n
+}
+
+spec fn spec_assert() {
+    assert(1usize < 2int <= 3nat);
+}
+
+fn exec_spec_context_chain(a: u8, b: u16, c: u32)
+    requires
+        a < b <= c,
+{
+    proof {
+        let _ = a < b <= c;
+    }
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_exec_mode_rejects_chained_comparisons() {
+    check(
+        r#"
+fn exec_statement_chain(a: u8, b: u8, c: u8) {
+    let _ = a < b <= c;
+          //^^^^^^^^^^ expected bool, got u8
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_spec_mode_operator_contexts() {
+    check_no_mismatches(
+        r#"
+spec fn spec_ops(a: u8, b: u16) -> bool {
+    a < b
+}
+
+proof fn proof_ops(a: u8, b: u16) {
+    assert(a < b);
+}
+
+fn exec_spec_context_ops(a: u8, b: u16) -> u8
+    requires
+        a < b,
+    ensures
+        b > a,
+{
+    proof {
+        let _ = a < b;
+    }
+    proof_decl! {
+        let ghost _ = a < b;
+    };
+    proof! {
+        assume(a < b);
+    };
+    a
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_spec_mode_add_eq() {
+    check_no_mismatches(
+        r#"
+struct int;
+
+const A: usize = 1;
+
+fn test_add_spec_mode() {
+    assert(A + 1 == 2int);
+    assert(A + 1 === 2int);
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_spec_integer_arithmetic_types() {
+    check_types(
+        r#"
+struct int;
+struct nat;
+
+spec fn test(i: int, n: nat, s: i32, u: u32) {
+    n + n;
+  //^^^^^ nat
+    n + 1;
+  //^^^^^ nat
+    n - n;
+  //^^^^^ int
+    s + u;
+  //^^^^^ int
+    u + u;
+  //^^^^^ int
+    s / s;
+  //^^^^^ int
+    u / u;
+  //^^^^^ u32
+    n / n;
+  //^^^^^ nat
+    s % s;
+  //^^^^^ i32
+    i % i;
+  //^^^^^ int
+    u % 1;
+  //^^^^^ u32
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_view_expr_as_view_method() {
+    check_types(
+        r#"
+struct ExecValue;
+struct SpecView;
+
+impl ExecValue {
+    spec fn view(self) -> SpecView { loop {} }
+}
+
+spec fn test_view_expr(value: ExecValue) -> SpecView {
+    value.view()
+} //^^^^^^^^^^^^ SpecView
+
+spec fn test_at_view_expr(value: ExecValue) -> SpecView {
+    value@
+} //^^^^^^ SpecView
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_exec_mode_rejects_spec_operator_relaxation() {
+    check(
+        r#"
+fn exec_statement_ops(a: u8, b: u16) {
+    let ghost ok = a < b;
+    let tracked also_ok = b > a;
+    let _ = a < b;
+          //^^^^^ expected u8, got u16
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_forall_quantifier_expr() {
+    check_no_mismatches(
+        r#"
+struct int;
+
+pub open spec fn test(n: usize) -> bool {
+    forall |index: int| 0 <= index < n ==> #[trigger] index < n
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_assert_forall_implies_block() {
+    check_no_mismatches(
+        r#"
+struct int;
+
+pub proof fn test_assert_forall_block() {
+    assert forall |x: int| #[trigger] (x + 0) > 0 implies {
+        true
+    } by {};
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_choose_quantifier_expr() {
+    check_no_mismatches(
+        r#"
+struct int;
+
+spec fn pick_positive() -> int {
+    choose |x: int| x > 0
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_tail_macro_expr_return_type() {
+    check_no_mismatches(
+        r#"
+struct nat;
+struct Seq<T>;
+
+spec fn create_seq() -> Seq<nat> {
+    seq![0, 1, 2, 3, 4]
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_tracked_and_ghost_parameter_patterns() {
+    check_types(
+        r#"
+fn tracked_param<T>(Tracked(a): Tracked<T>) {
+    a;
+} //^ T
+
+fn ghost_param<U>(Ghost(b): Ghost<U>) {
+    b;
+} //^ U
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_numeric_literals() {
+    check_infer(
+        r#"
+struct int;
+struct nat;
+struct real;
+
+fn test() {
+    0int;
+    0nat;
+    0real;
+}
+"#,
+        expect![[r#"
+            48..82 '{     ...eal; }': ()
+            54..58 '0int': int
+            64..68 '0nat': nat
+            74..79 '0real': real
+        "#]],
+    );
+}
+
+#[test]
+fn verus_infer_foreign_numeric_literals() {
+    check_infer(
+        r#"
+extern "Rust" {
+    type int;
+    type nat;
+    type real;
+}
+
+fn test() {
+    0int;
+    0nat;
+    0real;
+}
+"#,
+        expect![[r#"
+            72..106 '{     ...eal; }': ()
+            78..82 '0int': int
+            88..92 '0nat': nat
+            98..103 '0real': real
+        "#]],
+    );
+}
+
+#[test]
+fn verus_infer_unsuffixed_integer_literals_from_usage() {
+    check_infer(
+        r#"
+struct int;
+struct nat;
+
+spec fn id_nat(x: nat) -> nat { x }
+spec fn id_int(x: int) -> int { x }
+
+spec fn test_infer_int() -> () {
+    let x = 0;
+    id_int(x);
+    ()
+}
+
+spec fn test_infer_nat() -> () {
+    let x = 0;
+    id_nat(x);
+    ()
+}
+"#,
+        expect![[r#"
+            40..41 'x': nat
+            55..60 '{ x }': nat
+            57..58 'x': nat
+            76..77 'x': int
+            91..96 '{ x }': int
+            93..94 'x': int
+            129..169 '{     ...  () }': ()
+            139..140 'x': int
+            143..144 '0': int
+            150..156 'id_int': fn id_int(int) -> int
+            150..159 'id_int(x)': int
+            157..158 'x': int
+            165..167 '()': ()
+            202..242 '{     ...  () }': ()
+            212..213 'x': nat
+            216..217 '0': nat
+            223..229 'id_nat': fn id_nat(nat) -> nat
+            223..232 'id_nat(x)': nat
+            230..231 'x': nat
+            238..240 '()': ()
+        "#]],
+    );
+}
+
+#[test]
+fn verus_infer_unsuffixed_integer_literal_conflict() {
+    check(
+        r#"
+struct int;
+struct nat;
+
+spec fn id_nat(x: nat) -> nat { x }
+spec fn id_int(x: int) -> int { x }
+
+spec fn test_infer_nat_and_int() -> bool {
+    let x = 0;
+    id_int(x) == id_nat(x)
+                      //^ expected nat, got int
+}
+"#,
+    );
+}
+
+#[test]
+fn verus_infer_prelude_map_from_verus_macro_alias() {
+    check_types(
+        r#"
+//- /main.rs crate:main deps:vstd
+use vstd::prelude::*;
+
+pub tracked struct S {
+    pub f: Map<int, int>,
+}
+
+pub open spec fn test_spec_struct_field_access(s: S) -> Map<int, int> {
+    s.f
+} //^^^ Map<int, int>
+
+pub open spec fn test_spec_map_indexing(s: S) -> int {
+    s.f[0]
+} //^^^^^^ int
+
+//- /vstd.rs crate:vstd
+pub mod prelude {
+    pub use crate::map::Map;
+
+    pub struct int;
+}
+
+pub mod map {
+    use verus as verus_;
+
+    verus_! {
+        pub tracked struct Map<K, V>(K, V);
+    }
+}
+"#,
+    );
+}
+
+#[test]
 fn labelled_block_break() {
     check_types(
         r#"

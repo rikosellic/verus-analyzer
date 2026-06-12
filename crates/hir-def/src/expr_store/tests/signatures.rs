@@ -29,6 +29,8 @@ fn lower_and_print(#[rust_analyzer::rust_fixture] ra_fixture: &str, expect: Expe
                 ModuleDefId::EnumVariantId(_) => continue,
                 ModuleDefId::BuiltinType(_) => continue,
                 ModuleDefId::MacroId(_) => continue,
+                // verus
+                ModuleDefId::BroadcastGroupId(_) => continue,
             };
             defs.push(def);
         }

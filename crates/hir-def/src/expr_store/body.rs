@@ -93,6 +93,7 @@ impl Body {
     ) -> (Arc<Body>, BodySourceMap) {
         let _p = tracing::info_span!("body_with_source_map_query").entered();
         let mut params = None;
+        let mut contract_exprs = Vec::new();
 
         let mut is_async_fn = false;
         let mut is_gen_fn = false;
@@ -102,6 +103,15 @@ impl Body {
                     let f = f.lookup(db);
                     let src = f.source(db);
                     params = src.value.param_list();
+                    if let Some(clause) = src.value.requires_clause() {
+                        contract_exprs.extend(clause.exprs());
+                    }
+                    if let Some(clause) = src.value.ensures_clause() {
+                        contract_exprs.extend(clause.exprs());
+                    }
+                    if let Some(clause) = src.value.default_ensures_clause() {
+                        contract_exprs.extend(clause.exprs());
+                    }
                     is_async_fn = src.value.async_token().is_some();
                     is_gen_fn = src.value.gen_token().is_some();
                     src.map(|it| it.body().map(ast::Expr::from))
@@ -124,8 +134,17 @@ impl Body {
             }
         };
         let module = def.module(db);
-        let (body, source_map) =
-            lower_body(db, def, file_id, module, params, body, is_async_fn, is_gen_fn);
+        let (body, source_map) = lower_body(
+            db,
+            def,
+            file_id,
+            module,
+            params,
+            body,
+            contract_exprs,
+            is_async_fn,
+            is_gen_fn,
+        );
 
         (Arc::new(body), source_map)
     }
@@ -138,9 +157,8 @@ impl Body {
 
 impl Body {
     pub fn root_expr(&self) -> ExprId {
-        // A `Body` can also contain root expressions that aren't the body (in the param patterns),
-        // but the body always come last.
-        self.store.expr_roots().next_back().unwrap()
+        // A `Body` can also contain Verus contract expressions after the body root.
+        self.store.expr_roots().next().unwrap()
     }
 
     /// Returns `true` if this is the formal or user-written self param.

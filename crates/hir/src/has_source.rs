@@ -13,9 +13,10 @@ use syntax::{AstNode, ast};
 use tt::TextRange;
 
 use crate::{
-    Adt, AnyFunctionId, Callee, Const, Enum, EnumVariant, ExternCrateDecl, Field, FieldSource,
-    Function, Impl, InlineAsmOperand, Label, LifetimeParam, LocalSource, Macro, Module, Param,
-    SelfParam, Static, Struct, Trait, TypeAlias, TypeOrConstParam, Union, Variant, db::HirDatabase,
+    Adt, AnyFunctionId, BroadcastGroup, Callee, Const, Enum, EnumVariant, ExternCrateDecl, Field,
+    FieldSource, Function, Impl, InlineAsmOperand, Label, LifetimeParam, LocalSource, Macro,
+    Module, Param, SelfParam, Static, Struct, Trait, TypeAlias, TypeOrConstParam, Union, Variant,
+    db::HirDatabase,
 };
 
 pub trait HasSource: Sized {
@@ -155,6 +156,13 @@ impl HasSource for Enum {
 impl HasSource for EnumVariant {
     type Ast = ast::Variant;
     fn source(self, db: &dyn HirDatabase) -> Option<InFile<ast::Variant>> {
+        Some(self.id.lookup(db).source(db))
+    }
+}
+// verus
+impl HasSource for BroadcastGroup {
+    type Ast = ast::BroadcastGroup;
+    fn source(self, db: &dyn HirDatabase) -> Option<InFile<ast::BroadcastGroup>> {
         Some(self.id.lookup(db).source(db))
     }
 }

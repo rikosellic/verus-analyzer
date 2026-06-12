@@ -39,7 +39,9 @@ pub(crate) fn complete_type_path<'db>(
                 true
             }
             // Type things are fine
-            ScopeDef::ModuleDef(BuiltinType(_) | Adt(_) | Module(_) | Trait(_) | TypeAlias(_))
+            ScopeDef::ModuleDef(
+                BuiltinType(_) | Adt(_) | Module(_) | Trait(_) | TypeAlias(_) | BroadcastGroup(_),
+            )
             | ScopeDef::AdtSelfType(_)
             | ScopeDef::Unknown
             | ScopeDef::GenericParam(TypeParam(_)) => location.complete_types(),
@@ -50,7 +52,9 @@ pub(crate) fn complete_type_path<'db>(
         hir::AssocItem::Const(ct) if matches!(location, TypeLocation::GenericArg { .. }) => {
             acc.add_const(ctx, ct)
         }
-        hir::AssocItem::Function(_) | hir::AssocItem::Const(_) => (),
+        hir::AssocItem::Function(_)
+        | hir::AssocItem::Const(_)
+        | hir::AssocItem::BroadcastGroup(_) => (),
         hir::AssocItem::TypeAlias(ty) => acc.add_type_alias(ctx, ty),
     };
 

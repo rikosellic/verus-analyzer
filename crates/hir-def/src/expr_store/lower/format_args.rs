@@ -325,6 +325,7 @@ impl<'db> ExprCollector<'db> {
                 type_ref: None,
                 initializer: Some(args_tuple),
                 else_branch: None,
+                is_verus_spec_mode: false,
             };
 
             // Generate:
@@ -358,6 +359,7 @@ impl<'db> ExprCollector<'db> {
                 type_ref: None,
                 initializer: Some(args),
                 else_branch: None,
+                is_verus_spec_mode: false,
             };
             (
                 vec![let_statement_1, let_statement_2],
@@ -673,6 +675,7 @@ impl<'db> ExprCollector<'db> {
                 type_ref: None,
                 initializer: Some(args),
                 else_branch: None,
+                is_verus_spec_mode: false,
             };
             (vec![let_stmt], self.alloc_expr_desugared(Expr::Path(args_name.into())))
         } else {
@@ -703,6 +706,7 @@ impl<'db> ExprCollector<'db> {
                 type_ref: None,
                 initializer: Some(args_tuple),
                 else_branch: None,
+                is_verus_spec_mode: false,
             };
 
             // Generate:
@@ -739,6 +743,7 @@ impl<'db> ExprCollector<'db> {
                 type_ref: None,
                 initializer: Some(array),
                 else_branch: None,
+                is_verus_spec_mode: false,
             };
             (vec![let_stmt1, let_stmt2], self.alloc_expr_desugared(Expr::Path(args_name.into())))
         };

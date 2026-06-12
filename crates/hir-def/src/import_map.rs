@@ -181,6 +181,7 @@ impl ImportMap {
                                 ModuleDefId::TypeAliasId(it) => Some(it.into()),
                                 ModuleDefId::MacroId(it) => Some(it.into()),
                                 ModuleDefId::BuiltinType(_) => None,
+                                ModuleDefId::BroadcastGroupId(_) => None,
                             },
                             ItemInNs::Macros(id) => Some(id.into()),
                         }
@@ -281,6 +282,9 @@ impl ImportMap {
                     cov_mark::hit!(type_aliases_ignored);
                     continue;
                 }
+                // verus: broadcast groups don't participate in import_map; they
+                // are only resolvable via `Type::group_name`.
+                AssocItemId::BroadcastGroupId(_) => continue,
             };
             let assoc_item = if is_type_in_ns {
                 ItemInNs::Types(module_def_id)

@@ -238,7 +238,8 @@ pub(crate) fn resolve_doc_path_for_def<'db>(
         | Definition::Label(_)
         | Definition::DeriveHelper(_)
         | Definition::InlineAsmRegOrRegClass(_)
-        | Definition::InlineAsmOperand(_) => None,
+        | Definition::InlineAsmOperand(_)
+        | Definition::BroadcastGroup(_) => None,
     }
     .map(Definition::from)
 }
@@ -728,7 +729,8 @@ fn filename_and_frag_for_def<'db>(
         | Definition::ToolModule(_)
         | Definition::DeriveHelper(_)
         | Definition::InlineAsmRegOrRegClass(_)
-        | Definition::InlineAsmOperand(_) => return None,
+        | Definition::InlineAsmOperand(_)
+        | Definition::BroadcastGroup(_) => return None,
     };
 
     Some((def, res, None))
@@ -760,5 +762,7 @@ fn get_assoc_item_fragment(db: &dyn HirDatabase, assoc_item: hir::AssocItem) -> 
         AssocItem::TypeAlias(ty) => {
             format!("associatedtype.{}", ty.name(db).as_str())
         }
+        // verus: broadcast groups have no rustdoc fragment
+        AssocItem::BroadcastGroup(_) => return None,
     })
 }

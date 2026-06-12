@@ -4,15 +4,15 @@ use std::{iter::repeat_with, mem};
 
 use either::Either;
 use hir_def::{
-    AdtId, FieldId, TupleFieldId, TupleId, VariantId,
+    AdtId, FieldId, HasModule, TupleFieldId, TupleId, VariantId,
     expr_store::path::{GenericArgs as HirGenericArgs, Path},
     hir::{
         Array, AsmOperand, AsmOptions, BinaryOp, BindingAnnotation, Expr, ExprId,
-        ExprOrPatIdPacked, InlineAsmKind, LabelId, LoopSource, Pat, PatId, RecordLitField,
-        RecordSpread, Statement, UnaryOp,
+        ExprOrPatIdPacked, InlineAsmKind, LabelId, Literal, LoopSource, Pat, PatId, QuantifierKind,
+        RecordLitField, RecordSpread, Statement, UnaryOp,
     },
     resolver::ValueNs,
-    signatures::VariantFields,
+    signatures::{StructSignature, TypeAliasSignature, VariantFields},
 };
 use hir_def::{FunctionId, hir::ClosureKind};
 use hir_expand::name::Name;
@@ -256,6 +256,7 @@ impl<'db> InferenceContext<'db> {
             | Expr::Yield { .. }
             | Expr::Cast { .. }
             | Expr::Unsafe { .. }
+            | Expr::ProofBlock { .. }
             | Expr::Await { .. }
             | Expr::Ref { .. }
             | Expr::Range { .. }
@@ -264,6 +265,17 @@ impl<'db> InferenceContext<'db> {
             | Expr::Yeet { .. }
             | Expr::Missing
             | Expr::IncludeBytes => false,
+            // verus
+            Expr::Assert { .. }
+            | Expr::AssertForall { .. }
+            | Expr::Quantifier { .. }
+            | Expr::Assume { .. }
+            | Expr::Final { .. }
+            | Expr::View { .. }
+            | Expr::IsExpr { .. }
+            | Expr::HasExpr { .. }
+            | Expr::ArrowExpr { .. }
+            | Expr::MatchesExpr { .. } => false,
         }
     }
 
@@ -390,6 +402,9 @@ impl<'db> InferenceContext<'db> {
             Expr::Unsafe { id: _, statements, tail } => {
                 self.infer_block(tgt_expr, statements, *tail, None, expected)
             }
+            Expr::ProofBlock { id: _, statements, tail } => self.with_verus_spec_mode(|this| {
+                this.infer_block(tgt_expr, statements, *tail, None, expected)
+            }),
             Expr::Const(id) => {
                 self.with_breakable_ctx(BreakableKind::Border, None, None, |this| {
                     this.infer_expr(*id, expected, ExprIsRead::Yes)
@@ -715,28 +730,42 @@ impl<'db> InferenceContext<'db> {
             }
             Expr::Index { base, index } => {
                 let base_t = self.infer_expr_no_expect(*base, ExprIsRead::Yes);
-                let idx_t = self.infer_expr_no_expect(*index, ExprIsRead::Yes);
 
                 let base_t = self.structurally_resolve_type((*base).into(), base_t);
-                match self.lookup_indexing(tgt_expr, *base, *index, base_t, idx_t) {
-                    Some((trait_index_ty, trait_element_ty)) => {
-                        // two-phase not needed because index_ty is never mutable
-                        self.demand_coerce(
-                            *index,
-                            idx_t,
-                            trait_index_ty,
-                            AllowTwoPhase::No,
-                            ExprIsRead::Yes,
-                        );
-                        self.table.select_obligations_where_possible();
-                        trait_element_ty
-                    }
-                    None => {
-                        self.push_diagnostic(InferenceDiagnostic::CannotIndexInto {
-                            expr: tgt_expr,
-                            found: base_t.store(),
-                        });
-                        self.types.types.error
+                if self.in_verus_spec_mode()
+                    && let Some((map_index_ty, map_element_ty)) =
+                        self.verus_map_indexing_tys(base_t)
+                {
+                    let idx_t = self.infer_expr(
+                        *index,
+                        &Expectation::has_type(map_index_ty),
+                        ExprIsRead::Yes,
+                    );
+                    self.demand_coerce(
+                        *index,
+                        idx_t,
+                        map_index_ty,
+                        AllowTwoPhase::No,
+                        ExprIsRead::Yes,
+                    );
+                    map_element_ty
+                } else {
+                    let idx_t = self.infer_expr_no_expect(*index, ExprIsRead::Yes);
+                    match self.lookup_indexing(tgt_expr, *base, *index, base_t, idx_t) {
+                        Some((trait_index_ty, trait_element_ty)) => {
+                            // two-phase not needed because index_ty is never mutable
+                            self.demand_coerce(
+                                *index,
+                                idx_t,
+                                trait_index_ty,
+                                AllowTwoPhase::No,
+                                ExprIsRead::Yes,
+                            );
+                            self.table.select_obligations_where_possible();
+                            trait_element_ty
+                        }
+                        // FIXME: Report an error.
+                        None => self.types.types.error,
                     }
                 }
             }
@@ -766,6 +795,11 @@ impl<'db> InferenceContext<'db> {
             Expr::Array(Array::Repeat { initializer, repeat }) => {
                 self.infer_array_repeat_expr(*initializer, *repeat, expected, tgt_expr)
             }
+            Expr::Literal(Literal::VerusInt(..)) => self.verus_numeric_literal_ty("int", tgt_expr),
+            Expr::Literal(Literal::VerusNat(..)) => self.verus_numeric_literal_ty("nat", tgt_expr),
+            Expr::Literal(Literal::VerusReal(..)) => {
+                self.verus_numeric_literal_ty("real", tgt_expr)
+            }
             Expr::Literal(lit) => literal_ty(
                 self.interner(),
                 lit,
@@ -773,12 +807,15 @@ impl<'db> InferenceContext<'db> {
                     let expected_ty = expected.to_option(&self.table);
                     tracing::debug!(?expected_ty);
                     let opt_ty = match expected_ty.as_ref().map(|it| it.kind()) {
+                        Some(TyKind::Infer(InferTy::TyVar(_))) if self.in_verus_spec_mode() => {
+                            expected_ty
+                        }
                         Some(TyKind::Int(_) | TyKind::Uint(_)) => expected_ty,
                         Some(TyKind::Char) => Some(self.types.types.u8),
                         Some(TyKind::RawPtr(..) | TyKind::FnDef(..) | TyKind::FnPtr(..)) => {
                             Some(self.types.types.usize)
                         }
-                        _ => None,
+                        _ => expected_ty.filter(|&ty| self.verus_numeric_name_of_ty(ty).is_some()),
                     };
                     opt_ty.unwrap_or_else(|| self.table.next_int_var())
                 },
@@ -790,7 +827,7 @@ impl<'db> InferenceContext<'db> {
                         Some(TyKind::RawPtr(..) | TyKind::FnDef(..) | TyKind::FnPtr(..)) => {
                             Some(self.types.types.usize)
                         }
-                        _ => None,
+                        _ => expected_ty.filter(|&ty| self.verus_numeric_name_of_ty(ty).is_some()),
                     };
                     opt_ty.unwrap_or_else(|| self.table.next_int_var())
                 },
@@ -893,6 +930,96 @@ impl<'db> InferenceContext<'db> {
                 let len = self.table.next_const_var(Span::Dummy);
                 let arr = Ty::new_array_with_const_len(self.interner(), self.types.types.u8, len);
                 Ty::new_ref(self.interner(), self.types.regions.statik, arr, Mutability::Not)
+            }
+            // verus
+            Expr::Assert { condition, body } => {
+                let bool_ty = self.types.types.bool;
+                self.with_verus_spec_mode(|this| {
+                    this.infer_expr_coerce_never(
+                        *condition,
+                        &Expectation::HasType(bool_ty),
+                        ExprIsRead::Yes,
+                    );
+                });
+                if let Some(body) = body {
+                    self.with_verus_spec_mode(|this| {
+                        this.infer_expr_coerce_never(
+                            *body,
+                            &Expectation::HasType(this.types.types.unit),
+                            ExprIsRead::Yes,
+                        );
+                    });
+                }
+                self.types.types.unit
+            }
+            Expr::AssertForall { closure, implies, body } => {
+                let bool_ty = self.types.types.bool;
+                self.with_verus_spec_mode(|this| {
+                    this.infer_expr_coerce_never(
+                        *closure,
+                        &Expectation::HasType(bool_ty),
+                        ExprIsRead::Yes,
+                    );
+                });
+                if let &Some(i) = implies {
+                    self.with_verus_spec_mode(|this| {
+                        this.infer_expr_coerce_never(
+                            i,
+                            &Expectation::HasType(bool_ty),
+                            ExprIsRead::Yes,
+                        );
+                    });
+                }
+                if let &Some(body) = body {
+                    self.with_verus_spec_mode(|this| {
+                        this.infer_expr_coerce_never(
+                            body,
+                            &Expectation::HasType(this.types.types.unit),
+                            ExprIsRead::Yes,
+                        );
+                    });
+                }
+                self.types.types.unit
+            }
+            Expr::Quantifier { args, arg_types, body, kind } => self.with_verus_spec_mode(|this| {
+                this.infer_quantifier_expr(*kind, args, arg_types, *body)
+            }),
+            Expr::Assume { condition } => {
+                let bool_ty = self.types.types.bool;
+                self.with_verus_spec_mode(|this| {
+                    this.infer_expr_coerce_never(
+                        *condition,
+                        &Expectation::HasType(bool_ty),
+                        ExprIsRead::Yes,
+                    );
+                });
+                self.types.types.unit
+            }
+            Expr::Final { expr } => self.infer_expr(*expr, &Expectation::None, ExprIsRead::Yes),
+            Expr::View { condition } => self.with_verus_spec_mode(|this| {
+                this.infer_method_call(
+                    tgt_expr,
+                    *condition,
+                    &[],
+                    &Name::new_root("view"),
+                    None,
+                    expected,
+                )
+            }),
+            Expr::IsExpr { expr, type_ref: _ } => {
+                self.infer_expr(*expr, &Expectation::None, ExprIsRead::Yes);
+                self.types.types.bool
+            }
+            Expr::HasExpr { expr_collection, expr_elt } => {
+                self.infer_expr(*expr_collection, &Expectation::None, ExprIsRead::Yes);
+                self.infer_expr(*expr_elt, &Expectation::None, ExprIsRead::Yes);
+                self.types.types.bool
+            }
+            Expr::ArrowExpr { expr, name } => self.infer_arrow_expr(tgt_expr, *expr, name),
+            Expr::MatchesExpr { expr, pat } => {
+                let input_ty = self.infer_expr(*expr, &Expectation::None, ExprIsRead::Yes);
+                self.infer_top_pat(*pat, input_ty, PatOrigin::LetExpr);
+                self.types.types.bool
             }
         };
         let ty = self.insert_type_vars_shallow(ty);
@@ -1290,6 +1417,32 @@ impl<'db> InferenceContext<'db> {
         ty
     }
 
+    fn infer_quantifier_expr(
+        &mut self,
+        kind: QuantifierKind,
+        args: &[PatId],
+        arg_types: &[Option<hir_def::type_ref::TypeRefId>],
+        body: ExprId,
+    ) -> Ty<'db> {
+        let bool_ty = self.types.types.bool;
+        let mut param_tys = Vec::with_capacity(args.len());
+        for (&arg, &arg_ty) in args.iter().zip(arg_types) {
+            let ty = arg_ty
+                .map(|arg_ty| self.make_body_ty(arg_ty))
+                .unwrap_or_else(|| self.table.next_ty_var(arg.into()));
+            self.infer_top_pat(arg, ty, PatOrigin::Param);
+            param_tys.push(ty);
+        }
+        self.infer_expr_coerce_never(body, &Expectation::HasType(bool_ty), ExprIsRead::Yes);
+        match kind {
+            QuantifierKind::Forall | QuantifierKind::Exists => bool_ty,
+            QuantifierKind::Choose => match param_tys.as_slice() {
+                [] => self.err_ty(),
+                [ty] => *ty,
+                tys => Ty::new_tup(self.interner(), tys),
+            },
+        }
+    }
     fn infer_unop_expr(
         &mut self,
         unop: UnaryOp,
@@ -1324,14 +1477,48 @@ impl<'db> InferenceContext<'db> {
                 }
             }
             UnaryOp::Neg => {
-                let result = self.infer_user_unop(expr, oprnd_t, unop);
-                // If it's builtin, we can reuse the type, this helps inference.
-                if !oprnd_t.is_numeric() {
-                    oprnd_t = result;
+                if !oprnd_t.is_numeric() && self.verus_numeric_name_of_ty(oprnd_t) != Some("real") {
+                    oprnd_t = self.infer_user_unop(expr, oprnd_t, unop);
                 }
             }
         }
         oprnd_t
+    }
+
+    fn verus_numeric_literal_ty(&mut self, name: &str, expr: ExprId) -> Ty<'db> {
+        let path = Path::from(Name::new_root(name));
+        let (ty, _) = self.resolve_variant(expr.into(), &path, false);
+        if self.verus_numeric_name_of_ty(ty) == Some(name) { ty } else { self.err_ty() }
+    }
+
+    fn verus_numeric_name_of_ty(&self, ty: Ty<'db>) -> Option<&'static str> {
+        let name = if let Some((AdtId::StructId(id), _)) = ty.as_adt() {
+            StructSignature::of(self.db, id).name.clone()
+        } else if let TyKind::Foreign(alias) = ty.kind() {
+            TypeAliasSignature::of(self.db, alias.0).name.clone()
+        } else {
+            return None;
+        };
+
+        match name.as_str() {
+            "int" => Some("int"),
+            "nat" => Some("nat"),
+            "real" => Some("real"),
+            _ => None,
+        }
+    }
+
+    fn verus_map_indexing_tys(&self, ty: Ty<'db>) -> Option<(Ty<'db>, Ty<'db>)> {
+        let TyKind::Adt(adt, args) = ty.kind() else { return None };
+        let AdtId::StructId(struct_id) = adt.def_id() else { return None };
+        let signature = StructSignature::of(self.db, struct_id);
+        if signature.name.as_str() == "Map"
+            && adt.def_id().module(self.db).name(self.db).is_some_and(|name| name.as_str() == "map")
+        {
+            Some((args.type_at(0), args.type_at(1)))
+        } else {
+            None
+        }
     }
 
     fn infer_array_repeat_expr(
@@ -1522,7 +1709,13 @@ impl<'db> InferenceContext<'db> {
             self.with_breakable_ctx(BreakableKind::Block, Some(coerce_ty), label, |this| {
                 for stmt in statements {
                     match stmt {
-                        Statement::Let { pat, type_ref, initializer, else_branch } => {
+                        Statement::Let {
+                            pat,
+                            type_ref,
+                            initializer,
+                            else_branch,
+                            is_verus_spec_mode,
+                        } => {
                             let decl_ty = type_ref
                                 .as_ref()
                                 .map(|&tr| this.make_body_ty(tr))
@@ -1537,18 +1730,25 @@ impl<'db> InferenceContext<'db> {
                                     } else {
                                         ExprIsRead::No
                                     };
-                                let ty = if this.contains_explicit_ref_binding(*pat) {
-                                    this.infer_expr(
-                                        *expr,
-                                        &Expectation::has_type(decl_ty),
-                                        target_is_read,
-                                    )
+                                let infer_initializer = |this: &mut Self| {
+                                    if this.contains_explicit_ref_binding(*pat) {
+                                        this.infer_expr(
+                                            *expr,
+                                            &Expectation::has_type(decl_ty),
+                                            target_is_read,
+                                        )
+                                    } else {
+                                        this.infer_expr_coerce(
+                                            *expr,
+                                            &Expectation::has_type(decl_ty),
+                                            target_is_read,
+                                        )
+                                    }
+                                };
+                                let ty = if *is_verus_spec_mode {
+                                    this.with_verus_spec_mode(infer_initializer)
                                 } else {
-                                    this.infer_expr_coerce(
-                                        *expr,
-                                        &Expectation::has_type(decl_ty),
-                                        target_is_read,
-                                    )
+                                    infer_initializer(this)
                                 };
                                 if type_ref.is_some() { decl_ty } else { ty }
                             } else {
@@ -1770,6 +1970,70 @@ impl<'db> InferenceContext<'db> {
                 }
             }
         }
+    }
+
+    fn infer_arrow_expr(&mut self, tgt_expr: ExprId, receiver: ExprId, name: &Name) -> Ty<'db> {
+        let receiver_ty = self.infer_expr_inner(receiver, &Expectation::none(), ExprIsRead::No);
+        let receiver_ty = self.structurally_resolve_type(receiver.into(), receiver_ty);
+
+        if name.is_missing() {
+            return self.err_ty();
+        }
+
+        if let Some((ty, field_id, adjustments, is_public)) =
+            self.lookup_field(tgt_expr, receiver_ty, name)
+        {
+            self.write_expr_adj(receiver, adjustments.into_boxed_slice());
+            self.result.field_resolutions.insert(tgt_expr, field_id);
+            if !is_public && let Either::Left(field) = field_id {
+                self.push_diagnostic(InferenceDiagnostic::PrivateField { expr: tgt_expr, field });
+            }
+            return ty;
+        }
+
+        let TyKind::Adt(adt, parameters) = receiver_ty.kind() else {
+            return self.err_ty();
+        };
+        let hir_def::AdtId::EnumId(enum_id) = adt.def_id() else {
+            return self.err_ty();
+        };
+
+        let field_id = match self.lookup_enum_arrow_field(enum_id, name) {
+            Some(field_id) => field_id,
+            None => return self.err_ty(),
+        };
+        let ty = self.db.field_types(field_id.parent)[field_id.local_id]
+            .ty()
+            .instantiate(self.interner(), parameters)
+            .skip_norm_wip();
+        let ty = self.process_remote_user_written_ty(ty);
+        self.result.field_resolutions.insert(tgt_expr, Either::Left(field_id));
+        ty
+    }
+
+    fn lookup_enum_arrow_field(&self, enum_id: hir_def::EnumId, name: &Name) -> Option<FieldId> {
+        let mut unqualified = None;
+        let mut unqualified_ambiguous = false;
+        let mut qualified = None;
+        for (variant_name, &(variant, _)) in &enum_id.enum_variants(self.db).variants {
+            for (local_id, field) in variant.fields(self.db).fields().iter() {
+                let field_name = field.name.as_str();
+                let field_id = FieldId { parent: variant.into(), local_id };
+                if name.as_str() == field_name {
+                    if unqualified.is_some() {
+                        unqualified_ambiguous = true;
+                    } else if !unqualified_ambiguous {
+                        unqualified = Some(field_id);
+                    }
+                }
+                if name.as_str() == format!("{}_{}", variant_name.as_str(), field_name) {
+                    if qualified.replace(field_id).is_some() {
+                        return None;
+                    }
+                }
+            }
+        }
+        qualified.or(if unqualified_ambiguous { None } else { unqualified })
     }
 
     fn instantiate_erroneous_method(&mut self, def_id: FunctionId) -> MethodCallee<'db> {

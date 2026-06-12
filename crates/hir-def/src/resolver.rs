@@ -15,7 +15,7 @@ use span::SyntaxContext;
 use syntax::ast::HasName;
 
 use crate::{
-    AdtId, AstIdLoc, ConstId, ConstParamId, DefWithBodyId, EnumId, EnumVariantId,
+    AdtId, AstIdLoc, BroadcastGroupId, ConstId, ConstParamId, DefWithBodyId, EnumId, EnumVariantId,
     ExpressionStoreOwnerId, ExternBlockId, ExternCrateId, FunctionId, FxIndexMap, GenericDefId,
     GenericParamId, HasModule, ImplId, ItemContainerId, LifetimeParamId, Lookup, Macro2Id, MacroId,
     MacroRulesId, ModuleDefId, ModuleId, ProcMacroId, StaticId, StructId, TraitId, TypeAliasId,
@@ -1192,7 +1192,8 @@ impl<'db> ModuleItemMap<'db> {
                     | ModuleDefId::EnumVariantId(_)
                     | ModuleDefId::ConstId(_)
                     | ModuleDefId::MacroId(_)
-                    | ModuleDefId::StaticId(_) => return None,
+                    | ModuleDefId::StaticId(_)
+                    | ModuleDefId::BroadcastGroupId(_) => return None,
                 };
                 Some((ResolveValueResult::Partial(ty, unresolved_idx), prefix_info))
             }
@@ -1236,7 +1237,8 @@ fn to_value_ns(per_ns: PerNs, def_map: &DefMap) -> Option<ValueNs> {
         | ModuleDefId::TypeAliasId(_)
         | ModuleDefId::BuiltinType(_)
         | ModuleDefId::MacroId(_)
-        | ModuleDefId::ModuleId(_) => return None,
+        | ModuleDefId::ModuleId(_)
+        | ModuleDefId::BroadcastGroupId(_) => return None,
     };
     Some(res)
 }
@@ -1257,7 +1259,8 @@ fn to_type_ns(per_ns: PerNs) -> Option<(TypeNs, Option<ImportOrExternCrate>)> {
         ModuleDefId::FunctionId(_)
         | ModuleDefId::ConstId(_)
         | ModuleDefId::MacroId(_)
-        | ModuleDefId::StaticId(_) => return None,
+        | ModuleDefId::StaticId(_)
+        | ModuleDefId::BroadcastGroupId(_) => return None,
     };
     Some((res, def.import))
 }
@@ -1380,6 +1383,13 @@ impl HasResolver for TypeAliasId {
 impl HasResolver for ImplId {
     fn resolver(self, db: &dyn SourceDatabase) -> Resolver<'_> {
         lookup_resolver(db, self).push_generic_params_scope(db, self.into())
+    }
+}
+
+// verus: broadcast groups inherit their resolver from the enclosing module.
+impl HasResolver for BroadcastGroupId {
+    fn resolver(self, db: &dyn SourceDatabase) -> Resolver<'_> {
+        self.lookup(db).container.resolver(db)
     }
 }
 

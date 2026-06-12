@@ -98,9 +98,29 @@ pub type TypeSource = InFile<TypePtr>;
 pub type LifetimePtr = AstPtr<ast::Lifetime>;
 pub type LifetimeSource = InFile<LifetimePtr>;
 
+/// Describes where a const expression originated from.
+///
+/// Used by signature/body inference to determine the expected type for each
+/// const expression root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RootExprOrigin {
+    /// Array length expression: `[T; <expr>]` — expected type is `usize`.
+    ArrayLength,
+    /// Const parameter default value: `const N: usize = <expr>`.
+    ConstParam(crate::hir::generics::LocalTypeOrConstParamId),
+    /// Const generic argument in a path: `SomeType::<{ <expr> }>` or `some_fn::<{ <expr> }>()`.
+    /// Determining the expected type requires path resolution, so it is deferred.
+    GenericArgsPath,
+    /// The root expression of a body.
+    BodyRoot,
+    /// A Verus function contract expression, such as `requires` or `ensures`.
+    VerusContract,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ExprRoot {
     root: ExprId,
+    origin: RootExprOrigin,
     // We store, for each root, the range of exprs (and pats and bindings) it holds.
     // We store only the end (exclusive), since the start can be inferred from the previous
     // roots or is zero.
@@ -560,6 +580,16 @@ impl ExpressionStore {
             .map(|root| root.root)
     }
 
+    pub fn expr_roots_with_origins(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (ExprId, RootExprOrigin)> + '_ {
+        self.expr_only
+            .as_ref()
+            .map_or(&[][..], |expr_only| &expr_only.expr_roots)
+            .iter()
+            .map(|root| (root.root, root.origin))
+    }
+
     fn find_root_for(
         &self,
         mut get: impl FnMut(&ExprRoot) -> la_arena::RawIdx,
@@ -700,10 +730,17 @@ impl ExpressionStore {
                 visitor.on_expr(*expr);
             }
             Expr::Block { statements, tail, id: _, label: _ }
-            | Expr::Unsafe { statements, tail, id: _ } => {
+            | Expr::Unsafe { statements, tail, id: _ }
+            | Expr::ProofBlock { statements, tail, id: _ } => {
                 for stmt in statements {
                     match stmt {
-                        Statement::Let { initializer, else_branch, pat, type_ref } => {
+                        Statement::Let {
+                            initializer,
+                            else_branch,
+                            pat,
+                            type_ref,
+                            is_verus_spec_mode: _,
+                        } => {
                             visitor.on_expr_opt(*initializer);
                             visitor.on_expr_opt(*else_branch);
                             visitor.on_pat(*pat);
@@ -793,6 +830,34 @@ impl ExpressionStore {
                 visitor.on_expr(value);
             }
             Expr::IncludeBytes => {}
+            // verus
+            Expr::Assert { condition, body } => {
+                visitor.on_expr(*condition);
+                visitor.on_expr_opt(*body);
+            }
+            Expr::Assume { condition } | Expr::View { condition } => {
+                visitor.on_expr(*condition);
+            }
+            Expr::AssertForall { closure, implies, body } => {
+                visitor.on_expr(*closure);
+                visitor.on_expr_opt(*implies);
+                visitor.on_expr_opt(*body);
+            }
+            Expr::Final { expr } | Expr::IsExpr { expr, .. } | Expr::ArrowExpr { expr, .. } => {
+                visitor.on_expr(*expr);
+            }
+            Expr::HasExpr { expr_collection, expr_elt } => {
+                visitor.on_expr(*expr_collection);
+                visitor.on_expr(*expr_elt);
+            }
+            Expr::MatchesExpr { expr, pat } => {
+                visitor.on_expr(*expr);
+                visitor.on_pat(*pat);
+            }
+            Expr::Quantifier { args, arg_types: _, body, kind: _ } => {
+                visitor.on_expr(*body);
+                visitor.on_pats(args);
+            }
         }
     }
 

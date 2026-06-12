@@ -37,6 +37,7 @@ pub(super) fn hints(
                 ast::BlockModifier::Unsafe(_)
                 | ast::BlockModifier::Try { .. }
                 | ast::BlockModifier::Const(_)
+                | ast::BlockModifier::Proof(_)
                 | ast::BlockModifier::Label(_) => return None,
             }
             let move_token = block.move_token();

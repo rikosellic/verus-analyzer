@@ -301,6 +301,7 @@ pub fn for_each_tail_expr(expr: &ast::Expr, cb: &mut dyn FnMut(&ast::Expr)) {
                     });
                 }
                 Some(ast::BlockModifier::Unsafe(_)) => (),
+                Some(ast::BlockModifier::Proof(_)) => (),
                 Some(ast::BlockModifier::Gen(_)) => (),
                 Some(ast::BlockModifier::AsyncGen(_)) => (),
                 None => (),
@@ -366,6 +367,16 @@ pub fn for_each_tail_expr(expr: &ast::Expr, cb: &mut dyn FnMut(&ast::Expr)) {
         | ast::Expr::FormatArgsExpr(_)
         | ast::Expr::AsmExpr(_)
         | ast::Expr::IncludeBytesExpr(_) => cb(expr),
+        // Verus
+        ast::Expr::ViewExpr(_)
+        | ast::Expr::AssertExpr(_)
+        | ast::Expr::AssumeExpr(_)
+        | ast::Expr::FinalExpr(_)
+        | ast::Expr::AssertForallExpr(_)
+        | ast::Expr::IsExpr(_)
+        | ast::Expr::HasExpr(_)
+        | ast::Expr::ArrowExpr(_)
+        | ast::Expr::MatchesExpr(_) => cb(expr),
     }
 }
 

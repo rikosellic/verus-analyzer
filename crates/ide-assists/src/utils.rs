@@ -189,6 +189,9 @@ pub fn filter_assoc_items(
                 hir::AssocItem::Function(it) => sema.source(it)?.map(ast::AssocItem::Fn),
                 hir::AssocItem::TypeAlias(it) => sema.source(it)?.map(ast::AssocItem::TypeAlias),
                 hir::AssocItem::Const(it) => sema.source(it)?.map(ast::AssocItem::Const),
+                // verus: broadcast groups don't appear in the impl-skeleton
+                // generation flow used by this assist.
+                hir::AssocItem::BroadcastGroup(_) => return None,
             };
             Some(item)
         })
@@ -206,6 +209,7 @@ pub fn filter_assoc_items(
                 (default_methods, def.ty()),
                 (DefaultMethods::Only, Some(_)) | (DefaultMethods::No, None)
             ),
+            ast::AssocItem::BroadcastGroup(_) => false,
             ast::AssocItem::MacroCall(_) => unreachable!(),
         })
         .collect();
@@ -216,6 +220,7 @@ pub fn filter_assoc_items(
             ast::AssocItem::TypeAlias(def) => def.name(),
             ast::AssocItem::Const(def) => def.name(),
             ast::AssocItem::MacroCall(_) => None,
+            ast::AssocItem::BroadcastGroup(_) => None,
         }
         .is_some()
     }
@@ -245,7 +250,7 @@ pub fn add_trait_assoc_items_to_impl(
                     let item_prettified = prettify_macro_expansion(
                         sema.db,
                         original_item.syntax().clone(),
-                        span_map,
+                        &span_map,
                         target_scope.krate().into(),
                     );
                     if let Some(formatted) = ast::AssocItem::cast(item_prettified) {
